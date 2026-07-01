@@ -1,0 +1,485 @@
+"use client";
+import React, { useState, useEffect, useMemo } from "react";
+import { Search, ChevronRight, Edit3, Trash2, Plus, Save, X, BookOpen, FileText, Folder, Home, ArrowLeft, Download, RotateCcw, Check, ShieldCheck, Globe, CheckCircle, Gavel, DollarSign, HelpCircle, Book, Wrench, Users, Lock } from "lucide-react";
+
+function renderInline(text) {
+  // bold **x**
+  const parts = [];
+  let rest = text;
+  let key = 0;
+  const re = /\*\*(.+?)\*\*/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(<strong key={key++} className="font-semibold text-[#1B2E6B]">{m[1]}</strong>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length ? parts : text;
+}
+
+function Markdown({ text }) {
+  const lines = (text || "").split("\n");
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim() === "") { i++; continue; }
+    if (line.startsWith("## ")) {
+      blocks.push(<h3 key={i} className="cba-eyebrow mt-9 mb-3 text-[#1B2E6B]">{line.slice(3)}</h3>);
+      i++;
+    } else if (/^\s*-\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*-\s+/, ""));
+        i++;
+      }
+      blocks.push(<ul key={i} className="my-4 space-y-2.5">{items.map((it, k) => (
+        <li key={k} className="flex gap-3 cba-body">
+          <span className="mt-[11px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#1B2E6B]" />
+          <span>{renderInline(it)}</span>
+        </li>))}</ul>);
+    } else if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
+        i++;
+      }
+      blocks.push(<ol key={i} className="my-4 space-y-2.5">{items.map((it, k) => (
+        <li key={k} className="flex gap-3.5 cba-body">
+          <span className="shrink-0 text-[13px] font-semibold text-[#1B2E6B] tabular-nums pt-[3px]" style={{fontFamily:"'IBM Plex Mono', ui-monospace, monospace", letterSpacing:"0.05em"}}>{String(k + 1).padStart(2,"0")}</span>
+          <span>{renderInline(it)}</span>
+        </li>))}</ol>);
+    } else {
+      blocks.push(<p key={i} className="my-4 cba-body">{renderInline(line)}</p>);
+      i++;
+    }
+  }
+  return <div>{blocks}</div>;
+}
+
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+export default function App() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
+  const [view, setView] = useState({ type: "home" }); // home | category | article
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ title: "", body: "" });
+  const [toast, setToast] = useState("");
+  const [passcode, setPasscode] = useState("");
+
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2800); };
+
+  // ---- load from API ----
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/kb", { cache: "no-store" });
+        if (!res.ok) throw new Error("load failed");
+        setData(await res.json());
+      } catch {
+        flash("Could not load the knowledge base. Check your connection.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // remember passcode locally so editors don't retype it every time
+    try { const p = window.localStorage.getItem("cbb-kb-pass"); if (p) setPasscode(p); } catch {}
+  }, []);
+
+  // ---- persist whole doc to API (shared across everyone) ----
+  const persist = async (next) => {
+    setData(next); // optimistic
+    setSaving(true);
+    try {
+      const res = await fetch("/api/kb", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "x-kb-passcode": passcode },
+        body: JSON.stringify(next),
+      });
+      if (res.status === 401) { flash("Wrong passcode — changes not saved."); return false; }
+      if (!res.ok) { flash("Save failed. Try again."); return false; }
+      return true;
+    } catch {
+      flash("Save failed — network error.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Ask for the edit passcode once, cache it.
+  const ensurePasscode = () => {
+    if (passcode) return true;
+    const entered = window.prompt("Enter the editor passcode to make changes:");
+    if (entered == null) return false;
+    setPasscode(entered);
+    try { window.localStorage.setItem("cbb-kb-pass", entered); } catch {}
+    return true;
+  };
+
+  // ---- helpers ----
+  const findCategory = (id) => data?.categories.find((c) => c.id === id);
+  const findArticle = (catId, artId) => findCategory(catId)?.articles.find((a) => a.id === artId);
+
+  const totalArticles = useMemo(
+    () => data ? data.categories.reduce((n, c) => n + c.articles.length, 0) : 0, [data]);
+
+  const searchResults = useMemo(() => {
+    if (!data || query.trim().length < 2) return [];
+    const q = query.toLowerCase();
+    const hits = [];
+    for (const c of data.categories)
+      for (const a of c.articles) {
+        const inTitle = a.title.toLowerCase().includes(q);
+        const inBody = a.body.toLowerCase().includes(q);
+        if (inTitle || inBody) {
+          let snippet = "";
+          if (inBody) {
+            const idx = a.body.toLowerCase().indexOf(q);
+            const start = Math.max(0, idx - 40);
+            snippet = (start > 0 ? "…" : "") + a.body.slice(start, idx + 80).replace(/\n/g, " ") + "…";
+          }
+          hits.push({ cat: c, art: a, snippet });
+        }
+      }
+    return hits;
+  }, [data, query]);
+
+  // ---- CRUD ----
+  const openArticle = (catId, artId) => { setEditing(false); setView({ type: "article", catId, artId }); if (typeof window !== "undefined") window.scrollTo(0, 0); };
+
+  const startEdit = (art) => { if (!ensurePasscode()) return; setDraft({ title: art.title, body: art.body }); setEditing(true); };
+
+  const saveEdit = async () => {
+    const next = structuredClone(data);
+    const c = next.categories.find((x) => x.id === view.catId);
+    const a = c.articles.find((x) => x.id === view.artId);
+    a.title = draft.title.trim() || "Untitled";
+    a.body = draft.body;
+    const ok = await persist(next);
+    if (ok) { setEditing(false); flash("Article saved"); }
+  };
+
+  const deleteArticle = async (catId, artId) => {
+    if (!ensurePasscode()) return;
+    const next = structuredClone(data);
+    const c = next.categories.find((x) => x.id === catId);
+    c.articles = c.articles.filter((a) => a.id !== artId);
+    const ok = await persist(next);
+    if (ok) { setView({ type: "category", catId }); flash("Article deleted"); }
+  };
+
+  const addArticle = (catId) => {
+    if (!ensurePasscode()) return;
+    const next = structuredClone(data);
+    const c = next.categories.find((x) => x.id === catId);
+    const id = uid();
+    c.articles.push({ id, title: "New article", body: "Write the content here." });
+    persist(next);
+    setView({ type: "article", catId, artId: id });
+    setDraft({ title: "New article", body: "Write the content here." });
+    setEditing(true);
+  };
+
+  const addCategory = () => {
+    if (!ensurePasscode()) return;
+    const next = structuredClone(data);
+    const id = uid();
+    next.categories.push({ id, title: "New category", desc: "Describe this category.", articles: [] });
+    persist(next);
+    setView({ type: "category", catId: id });
+    flash("Category added — use Edit to rename it");
+  };
+
+  const [editCat, setEditCat] = useState(null);
+  const saveCat = async () => {
+    const next = structuredClone(data);
+    const c = next.categories.find((x) => x.id === editCat.id);
+    c.title = editCat.title.trim() || "Untitled category";
+    c.desc = editCat.desc;
+    const ok = await persist(next);
+    if (ok) { setEditCat(null); flash("Category updated"); }
+  };
+  const deleteCat = async (id) => {
+    const next = structuredClone(data);
+    next.categories = next.categories.filter((c) => c.id !== id);
+    const ok = await persist(next);
+    if (ok) { setEditCat(null); setView({ type: "home" }); flash("Category deleted"); }
+  };
+
+  const resetAll = async () => {
+    if (!ensurePasscode()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/kb/reset", { method: "POST", headers: { "x-kb-passcode": passcode } });
+      if (res.status === 401) { flash("Wrong passcode."); return; }
+      if (!res.ok) { flash("Reset failed."); return; }
+      setData(await res.json());
+      setView({ type: "home" });
+      flash("Reset to original content");
+    } catch { flash("Reset failed — network error."); }
+    finally { setSaving(false); }
+  };
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "cbb-knowledge-base.json"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading || !data)
+    return (
+      <div className="cba-root min-h-screen grid place-items-center bg-[#F5F2EB]">
+          <span className="cba-eyebrow text-[#1B2E6B]/60">Loading knowledge base…</span>
+      </div>
+    );
+
+  const ICON_MAP = {
+    "cat-sales": Users, "cat-journey": BookOpen, "cat-stages": FileText,
+    "cat-underwriting": ShieldCheck, "cat-ebail": Globe, "cat-closing": CheckCircle,
+    "cat-courts": Gavel, "cat-collections": DollarSign, "cat-general": HelpCircle,
+    "cat-terms": Book, "cat-it": Wrench,
+  };
+  const FALLBACK_ICONS = [Folder, FileText, BookOpen, Home];
+  const activeCatId = view.type === "category" ? view.catId : view.type === "article" ? view.catId : null;
+
+  const Logo = () => (
+    <button onClick={() => { setView({ type: "home" }); setQuery(""); setEditing(false); }} className="block text-left">
+      <div className="flex items-center gap-2.5">
+        <span className="grid h-10 w-10 place-items-center text-[#1B2E6B]" style={{fontSize:"30px",lineHeight:1}}>★</span>
+        <div className="leading-none">
+          <div className="cba-logo text-[19px] text-[#1B2E6B]">COWBOY</div>
+          <div className="cba-eyebrow text-[9px] text-[#1B2E6B]/70 mt-0.5">BAIL BONDS</div>
+        </div>
+      </div>
+    </button>
+  );
+
+  return (
+    <div className="cba-root min-h-screen bg-[#F5F2EB] text-slate-700">
+      <div className="mx-auto flex max-w-[1280px] gap-7 px-5 py-6">
+        {/* ===== SIDEBAR ===== */}
+        <aside className="hidden lg:block w-[264px] shrink-0">
+          <div className="sticky top-6">
+            <Logo />
+            <div className="cba-eyebrow mt-7 text-[#1B2E6B]/70">Cowboy Academy</div>
+            <h1 className="cba-display mt-2 text-[27px] leading-[1.08] text-[#1B2E6B]">Knowledge Base</h1>
+            <p className="cba-serif mt-3 text-[14px] italic leading-relaxed text-slate-500">"Helping, Caring, and Guiding the People we Serve"</p>
+            <div className="mt-5 flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#1B2E6B]" />
+              <span className="cba-eyebrow text-[10px] text-[#1B2E6B]/70">Operational Playbook</span>
+            </div>
+
+            <button onClick={() => { setView({ type: "home" }); setQuery(""); setEditing(false); }}
+              className={"mt-7 flex w-full items-center gap-3 rounded-2xl px-5 py-4 transition " + (view.type === "home" ? "bg-[#1B2E6B] text-white shadow-md" : "bg-white text-[#1B2E6B] hover:bg-white/60 ring-1 ring-[#1B2E6B]/8")}>
+              <Home className="h-5 w-5" />
+              <span className="cba-nav">All Guides</span>
+            </button>
+
+            <div className="mt-5 space-y-0.5">
+              {data.categories.map((c) => {
+                const Icon = ICON_MAP[c.id] || FALLBACK_ICONS[0];
+                const active = activeCatId === c.id;
+                return (
+                  <button key={c.id} onClick={() => setView({ type: "category", catId: c.id })}
+                    className={"flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left transition " + (active ? "bg-[#1B2E6B]/8 text-[#1B2E6B]" : "text-slate-500 hover:bg-[#1B2E6B]/5 hover:text-[#1B2E6B]")}>
+                    <Icon className={"h-4 w-4 shrink-0 " + (active ? "text-[#1B2E6B]" : "text-slate-400")} />
+                    <span className="cba-nav flex-1 truncate">{c.title}</span>
+                    {c.articles.length > 0 && <span className="cba-eyebrow text-[10px] text-slate-400">{c.articles.length}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={addCategory} className="mt-3 flex w-full items-center gap-2 rounded-xl px-4 py-2.5 text-slate-400 transition hover:text-[#1B2E6B]">
+              <Plus className="h-4 w-4" /><span className="cba-nav">New category</span>
+            </button>
+          </div>
+        </aside>
+
+        {/* ===== MAIN COLUMN ===== */}
+        <div className="min-w-0 flex-1">
+          {/* search bar */}
+          <div className="mb-6 flex items-center gap-3">
+            <div className="lg:hidden"><Logo /></div>
+            <div className="relative ml-auto w-full max-w-md">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#1B2E6B]/40" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search all guides…"
+                className="cba-body w-full rounded-full border border-[#1B2E6B]/12 bg-white py-3 pl-11 pr-4 text-[14px] text-slate-700 placeholder-slate-400 shadow-sm outline-none focus:border-[#1B2E6B]/40" />
+            </div>
+            <button onClick={exportJSON} title="Export backup" className="hidden sm:grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#1B2E6B]/12 bg-white text-slate-500 shadow-sm hover:text-[#1B2E6B]"><Download className="h-4 w-4" /></button>
+            <button onClick={() => { if (confirm("Reset all guides to the original content? Your edits will be lost.")) resetAll(); }} title="Reset" className="hidden sm:grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#1B2E6B]/12 bg-white text-slate-500 shadow-sm hover:text-[#1B2E6B]"><RotateCcw className="h-4 w-4" /></button>
+          </div>
+
+          {/* SEARCH RESULTS */}
+          {query.trim().length >= 2 ? (
+            <div>
+              <p className="cba-body mb-5 text-slate-500">{searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for "<span className="font-semibold text-[#1B2E6B]">{query}</span>"</p>
+              <div className="space-y-3">
+                {searchResults.map(({ cat, art, snippet }) => (
+                  <button key={cat.id + art.id} onClick={() => { openArticle(cat.id, art.id); setQuery(""); }}
+                    className="block w-full rounded-2xl border border-[#1B2E6B]/8 bg-white p-5 text-left shadow-sm transition hover:border-[#1B2E6B]/25 hover:shadow-md">
+                    <div className="cba-eyebrow mb-1 text-[#1B2E6B]/60">{cat.title}</div>
+                    <div className="cba-display text-[19px] text-[#1B2E6B]">{art.title}</div>
+                    {snippet && <div className="cba-body mt-1.5 text-[13.5px] text-slate-500">{snippet}</div>}
+                  </button>
+                ))}
+                {searchResults.length === 0 && <div className="cba-body rounded-2xl border border-dashed border-[#1B2E6B]/20 bg-white p-12 text-center text-slate-400">No articles match your search.</div>}
+              </div>
+            </div>
+          ) : view.type === "home" ? (
+            /* HOME */
+            <div>
+              <div className="rounded-3xl bg-white p-9 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-12">
+                <div className="cba-eyebrow text-[#1B2E6B]/60">Cowboy Bail Bonds · Internal Reference</div>
+                <h1 className="cba-display mt-4 text-[40px] leading-[1.05] text-[#1B2E6B] sm:text-[52px]">How can<br/>we help?</h1>
+                <p className="cba-body mt-5 max-w-xl text-[15.5px] text-slate-500">The complete operational playbook — customer journey, sales, and every ePros stage, plus department guides. {totalArticles} articles across {data.categories.length} guides.</p>
+              </div>
+
+              <div className="mb-4 mt-10 flex items-center justify-between">
+                <h2 className="cba-eyebrow text-[#1B2E6B]/70">Browse the guides</h2>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {data.categories.map((c) => {
+                  const Icon = ICON_MAP[c.id] || FALLBACK_ICONS[0];
+                  return (
+                    <button key={c.id} onClick={() => setView({ type: "category", catId: c.id })}
+                      className="group flex flex-col rounded-3xl border border-[#1B2E6B]/8 bg-white p-7 text-left shadow-sm transition hover:border-[#1B2E6B]/25 hover:shadow-md">
+                      <div className="mb-4 flex items-center gap-3">
+                        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#1B2E6B]/6 text-[#1B2E6B] transition group-hover:bg-[#1B2E6B] group-hover:text-white"><Icon className="h-5 w-5" /></span>
+                        <span className="cba-eyebrow rounded-full border border-[#1B2E6B]/15 px-3 py-1 text-[10px] text-[#1B2E6B]/70">{c.articles.length} article{c.articles.length !== 1 ? "s" : ""}</span>
+                      </div>
+                      <h3 className="cba-display text-[22px] leading-tight text-[#1B2E6B]">{c.title}</h3>
+                      <p className="cba-body mt-2 text-[13.5px] text-slate-500">{c.desc}</p>
+                      <span className="cba-nav mt-5 inline-flex items-center gap-1.5 text-[#1B2E6B] transition-all group-hover:gap-2.5">Open guide <ChevronRight className="h-4 w-4" /></span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : view.type === "category" ? (
+            /* CATEGORY */
+            (() => {
+              const c = findCategory(view.catId);
+              if (!c) return null;
+              return (
+                <div>
+                  <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
+                    <button onClick={() => setView({ type: "home" })} className="hover:text-[#1B2E6B]">Dashboard</button>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                    <span className="text-[#1B2E6B]">{c.title}</span>
+                  </div>
+                  <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-10">
+                    {editCat && editCat.id === c.id ? (
+                      <div className="space-y-3">
+                        <input value={editCat.title} onChange={(e)=>setEditCat({...editCat,title:e.target.value})} className="cba-display w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 text-[32px] text-[#1B2E6B] outline-none focus:border-[#1B2E6B]/50" />
+                        <textarea value={editCat.desc} onChange={(e)=>setEditCat({...editCat,desc:e.target.value})} rows={2} className="cba-body w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 outline-none focus:border-[#1B2E6B]/50" />
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={saveCat} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white"><Check className="h-4 w-4"/>Save</button>
+                          <button onClick={()=>setEditCat(null)} className="cba-nav rounded-full border border-[#1B2E6B]/20 px-4 py-2 text-slate-500">Cancel</button>
+                          <button onClick={()=>{ if(confirm("Delete this whole category and all its articles?")) deleteCat(c.id); }} className="cba-nav ml-auto flex items-center gap-1.5 rounded-full border border-red-200 px-4 py-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4"/>Delete category</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="cba-eyebrow text-[#1B2E6B]/60">{c.articles.length} article{c.articles.length !== 1 ? "s" : ""}</div>
+                          <h1 className="cba-display mt-2 text-[36px] leading-tight text-[#1B2E6B]">{c.title}</h1>
+                          <p className="cba-body mt-2 max-w-2xl text-slate-500">{c.desc}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <button onClick={()=>setEditCat({id:c.id,title:c.title,desc:c.desc})} className="cba-nav flex items-center gap-1.5 rounded-full border border-[#1B2E6B]/15 px-4 py-2 text-slate-500 hover:text-[#1B2E6B]"><Edit3 className="h-4 w-4"/>Edit</button>
+                          <button onClick={()=>addArticle(c.id)} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>New article</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 overflow-hidden rounded-3xl border border-[#1B2E6B]/8 bg-white shadow-sm">
+                    {c.articles.map((a, i) => (
+                      <button key={a.id} onClick={() => openArticle(c.id, a.id)}
+                        className={"flex w-full items-center gap-4 px-6 py-4 text-left transition hover:bg-[#F5F2EB] " + (i !== 0 ? "border-t border-[#1B2E6B]/6" : "")}>
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#1B2E6B]/5 text-[#1B2E6B]"><FileText className="h-4 w-4" /></span>
+                        <span className="cba-body flex-1 font-medium text-slate-700">{a.title}</span>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                      </button>
+                    ))}
+                    {c.articles.length === 0 && (
+                      <div className="px-6 py-16 text-center">
+                        <p className="cba-serif text-[17px] italic text-slate-400">No articles here yet.</p>
+                        <button onClick={()=>addArticle(c.id)} className="cba-nav mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>Write the first article</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            /* ARTICLE */
+            (() => {
+              const c = findCategory(view.catId);
+              const a = findArticle(view.catId, view.artId);
+              if (!c || !a) return null;
+              return (
+                <div className="mx-auto max-w-3xl">
+                  <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
+                    <button onClick={()=>setView({type:"home"})} className="hover:text-[#1B2E6B]">Dashboard</button>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                    <button onClick={()=>setView({type:"category",catId:c.id})} className="hover:text-[#1B2E6B]">{c.title}</button>
+                  </div>
+                  <article className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-11">
+                    {editing ? (
+                      <div>
+                        <label className="cba-eyebrow mb-2 block text-[#1B2E6B]/60">Title</label>
+                        <input value={draft.title} onChange={(e)=>setDraft({...draft,title:e.target.value})}
+                          className="cba-display mb-6 w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-3 text-[26px] text-[#1B2E6B] outline-none focus:border-[#1B2E6B]/50" />
+                        <label className="cba-eyebrow mb-2 block text-[#1B2E6B]/60">Content — ## heading · - bullet · 1. numbered · **bold**</label>
+                        <textarea value={draft.body} onChange={(e)=>setDraft({...draft,body:e.target.value})} rows={22}
+                          className="w-full resize-y rounded-xl border border-[#1B2E6B]/20 px-4 py-3 text-[13px] leading-relaxed text-slate-700 outline-none focus:border-[#1B2E6B]/50" style={{fontFamily:"'IBM Plex Mono', ui-monospace, monospace"}} />
+                        <div className="mt-6 flex gap-2">
+                          <button onClick={saveEdit} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-white hover:bg-[#24408f]"><Save className="h-4 w-4"/>Save changes</button>
+                          <button onClick={()=>setEditing(false)} className="cba-nav flex items-center gap-1.5 rounded-full border border-[#1B2E6B]/20 px-5 py-2.5 text-slate-500 hover:text-[#1B2E6B]"><X className="h-4 w-4"/>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="cba-eyebrow text-[#1B2E6B]/60">{c.title}</div>
+                        <div className="mt-3 flex items-start justify-between gap-4">
+                          <h1 className="cba-display text-[34px] leading-[1.08] text-[#1B2E6B] sm:text-[40px]">{a.title}</h1>
+                          <div className="flex shrink-0 gap-1.5">
+                            <button onClick={()=>startEdit(a)} title="Edit" className="grid h-10 w-10 place-items-center rounded-full border border-[#1B2E6B]/12 text-slate-400 hover:border-[#1B2E6B]/30 hover:text-[#1B2E6B]"><Edit3 className="h-4 w-4"/></button>
+                            <button onClick={()=>{ if(confirm("Delete this article?")) deleteArticle(c.id,a.id); }} title="Delete" className="grid h-10 w-10 place-items-center rounded-full border border-[#1B2E6B]/12 text-slate-400 hover:border-red-300 hover:text-red-600"><Trash2 className="h-4 w-4"/></button>
+                          </div>
+                        </div>
+                        <div className="mt-6 mb-2 h-px w-full bg-[#1B2E6B]/10" />
+                        <Markdown text={a.body} />
+                      </div>
+                    )}
+                  </article>
+                  {!editing && (
+                    <div className="mt-5">
+                      <button onClick={()=>setView({type:"category",catId:c.id})} className="cba-nav flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-[#1B2E6B]"><ArrowLeft className="h-4 w-4"/>Back to {c.title}</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          )}
+        </div>
+      </div>
+
+      {/* toast + save indicator */}
+      {(toast || saving) && (
+        <div className="cba-nav fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-[13px] text-white shadow-lg">
+          {saving ? "Saving…" : toast}
+        </div>
+      )}
+    </div>
+  );
+}
+

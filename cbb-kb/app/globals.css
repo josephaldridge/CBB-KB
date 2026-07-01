@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+html, body { background: #F5F2EB; }
+
+.cba-root { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+.cba-display { font-family: 'Newsreader', Georgia, 'Times New Roman', serif; font-weight: 500; letter-spacing: -0.01em; }
+.cba-serif { font-family: 'Newsreader', Georgia, serif; }
+.cba-logo { font-family: 'Newsreader', Georgia, serif; font-weight: 600; letter-spacing: 0.14em; }
+.cba-body { font-size: 15.5px; line-height: 1.72; color: #475569; }
+.cba-eyebrow { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; }
+.cba-nav { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; font-weight: 500; letter-spacing: 0.06em; }
