@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Search, ChevronRight, Edit3, Trash2, Plus, Save, X, BookOpen, FileText, Folder, Home, ArrowLeft, Download, RotateCcw, Check, ShieldCheck, Globe, CheckCircle, Gavel, DollarSign, HelpCircle, Book, Wrench, Users, Lock } from "lucide-react";
 
 function renderInline(text) {
@@ -60,6 +60,20 @@ function Markdown({ text }) {
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
+// ---- view <-> URL ----
+function viewToQuery(v) {
+  if (v.type === "category") return `?view=category&cat=${encodeURIComponent(v.catId)}`;
+  if (v.type === "article") return `?view=article&cat=${encodeURIComponent(v.catId)}&art=${encodeURIComponent(v.artId)}`;
+  return "";
+}
+function queryToView(search) {
+  const p = new URLSearchParams(search);
+  const type = p.get("view");
+  if (type === "category" && p.get("cat")) return { type: "category", catId: p.get("cat") };
+  if (type === "article" && p.get("cat") && p.get("art")) return { type: "article", catId: p.get("cat"), artId: p.get("art") };
+  return { type: "home" };
+}
+
 export default function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -72,6 +86,26 @@ export default function App() {
   const [passcode, setPasscode] = useState("");
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2800); };
+
+  // ---- navigation (kept in sync with real browser history) ----
+  const hasHistoryRef = useRef(false);
+
+  const navigate = (next) => {
+    setEditing(false);
+    setView(next);
+    if (typeof window !== "undefined") {
+      window.history.pushState({ cbbView: next }, "", window.location.pathname + viewToQuery(next));
+      hasHistoryRef.current = true;
+    }
+  };
+
+  const goBack = () => {
+    if (hasHistoryRef.current && typeof window !== "undefined") {
+      window.history.back();
+    } else {
+      navigate({ type: "home" });
+    }
+  };
 
   // ---- load from API ----
   useEffect(() => {
@@ -88,6 +122,22 @@ export default function App() {
     })();
     // remember passcode locally so editors don't retype it every time
     try { const p = window.localStorage.getItem("cbb-kb-pass"); if (p) setPasscode(p); } catch {}
+  }, []);
+
+  // ---- sync view with URL + browser back/forward ----
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const initial = queryToView(window.location.search);
+    window.history.replaceState({ cbbView: initial }, "", window.location.pathname + viewToQuery(initial));
+    setView(initial);
+
+    const onPopState = (e) => {
+      const next = (e.state && e.state.cbbView) || queryToView(window.location.search);
+      setEditing(false);
+      setView(next);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
   // ---- persist whole doc to API (shared across everyone) ----
@@ -150,7 +200,7 @@ export default function App() {
   }, [data, query]);
 
   // ---- CRUD ----
-  const openArticle = (catId, artId) => { setEditing(false); setView({ type: "article", catId, artId }); if (typeof window !== "undefined") window.scrollTo(0, 0); };
+  const openArticle = (catId, artId) => { navigate({ type: "article", catId, artId }); if (typeof window !== "undefined") window.scrollTo(0, 0); };
 
   const startEdit = (art) => { if (!ensurePasscode()) return; setDraft({ title: art.title, body: art.body }); setEditing(true); };
 
@@ -170,7 +220,7 @@ export default function App() {
     const c = next.categories.find((x) => x.id === catId);
     c.articles = c.articles.filter((a) => a.id !== artId);
     const ok = await persist(next);
-    if (ok) { setView({ type: "category", catId }); flash("Article deleted"); }
+    if (ok) { navigate({ type: "category", catId }); flash("Article deleted"); }
   };
 
   const addArticle = (catId) => {
@@ -180,7 +230,7 @@ export default function App() {
     const id = uid();
     c.articles.push({ id, title: "New article", body: "Write the content here." });
     persist(next);
-    setView({ type: "article", catId, artId: id });
+    navigate({ type: "article", catId, artId: id });
     setDraft({ title: "New article", body: "Write the content here." });
     setEditing(true);
   };
@@ -191,7 +241,7 @@ export default function App() {
     const id = uid();
     next.categories.push({ id, title: "New category", desc: "Describe this category.", articles: [] });
     persist(next);
-    setView({ type: "category", catId: id });
+    navigate({ type: "category", catId: id });
     flash("Category added — use Edit to rename it");
   };
 
@@ -208,7 +258,7 @@ export default function App() {
     const next = structuredClone(data);
     next.categories = next.categories.filter((c) => c.id !== id);
     const ok = await persist(next);
-    if (ok) { setEditCat(null); setView({ type: "home" }); flash("Category deleted"); }
+    if (ok) { setEditCat(null); navigate({ type: "home" }); flash("Category deleted"); }
   };
 
   const resetAll = async () => {
@@ -219,7 +269,7 @@ export default function App() {
       if (res.status === 401) { flash("Wrong passcode."); return; }
       if (!res.ok) { flash("Reset failed."); return; }
       setData(await res.json());
-      setView({ type: "home" });
+      navigate({ type: "home" });
       flash("Reset to original content");
     } catch { flash("Reset failed — network error."); }
     finally { setSaving(false); }
@@ -250,7 +300,7 @@ export default function App() {
   const activeCatId = view.type === "category" ? view.catId : view.type === "article" ? view.catId : null;
 
   const Logo = () => (
-    <button onClick={() => { setView({ type: "home" }); setQuery(""); setEditing(false); }} className="block text-left">
+    <button onClick={() => { navigate({ type: "home" }); setQuery(""); }} className="block text-left">
       <div className="flex items-center gap-2.5">
         <span className="grid h-10 w-10 place-items-center text-[#1B2E6B]" style={{fontSize:"30px",lineHeight:1}}>★</span>
         <div className="leading-none">
@@ -276,7 +326,7 @@ export default function App() {
               <span className="cba-eyebrow text-[10px] text-[#1B2E6B]/70">Operational Playbook</span>
             </div>
 
-            <button onClick={() => { setView({ type: "home" }); setQuery(""); setEditing(false); }}
+            <button onClick={() => { navigate({ type: "home" }); setQuery(""); }}
               className={"mt-7 flex w-full items-center gap-3 rounded-2xl px-5 py-4 transition " + (view.type === "home" ? "bg-[#1B2E6B] text-white shadow-md" : "bg-white text-[#1B2E6B] hover:bg-white/60 ring-1 ring-[#1B2E6B]/8")}>
               <Home className="h-5 w-5" />
               <span className="cba-nav">All Guides</span>
@@ -287,7 +337,7 @@ export default function App() {
                 const Icon = ICON_MAP[c.id] || FALLBACK_ICONS[0];
                 const active = activeCatId === c.id;
                 return (
-                  <button key={c.id} onClick={() => setView({ type: "category", catId: c.id })}
+                  <button key={c.id} onClick={() => navigate({ type: "category", catId: c.id })}
                     className={"flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left transition " + (active ? "bg-[#1B2E6B]/8 text-[#1B2E6B]" : "text-slate-500 hover:bg-[#1B2E6B]/5 hover:text-[#1B2E6B]")}>
                     <Icon className={"h-4 w-4 shrink-0 " + (active ? "text-[#1B2E6B]" : "text-slate-400")} />
                     <span className="cba-nav flex-1 truncate">{c.title}</span>
@@ -348,7 +398,7 @@ export default function App() {
                 {data.categories.map((c) => {
                   const Icon = ICON_MAP[c.id] || FALLBACK_ICONS[0];
                   return (
-                    <button key={c.id} onClick={() => setView({ type: "category", catId: c.id })}
+                    <button key={c.id} onClick={() => navigate({ type: "category", catId: c.id })}
                       className="group flex flex-col rounded-3xl border border-[#1B2E6B]/8 bg-white p-7 text-left shadow-sm transition hover:border-[#1B2E6B]/25 hover:shadow-md">
                       <div className="mb-4 flex items-center gap-3">
                         <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#1B2E6B]/6 text-[#1B2E6B] transition group-hover:bg-[#1B2E6B] group-hover:text-white"><Icon className="h-5 w-5" /></span>
@@ -370,7 +420,9 @@ export default function App() {
               return (
                 <div>
                   <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
-                    <button onClick={() => setView({ type: "home" })} className="hover:text-[#1B2E6B]">Dashboard</button>
+                    <button onClick={goBack} className="flex items-center gap-1 hover:text-[#1B2E6B]"><ArrowLeft className="h-3.5 w-3.5" />Back</button>
+                    <span className="text-[#1B2E6B]/20">|</span>
+                    <button onClick={() => navigate({ type: "home" })} className="hover:text-[#1B2E6B]">Dashboard</button>
                     <ChevronRight className="h-3.5 w-3.5" />
                     <span className="text-[#1B2E6B]">{c.title}</span>
                   </div>
@@ -428,9 +480,11 @@ export default function App() {
               return (
                 <div className="mx-auto max-w-3xl">
                   <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
-                    <button onClick={()=>setView({type:"home"})} className="hover:text-[#1B2E6B]">Dashboard</button>
+                    <button onClick={goBack} className="flex items-center gap-1 hover:text-[#1B2E6B]"><ArrowLeft className="h-3.5 w-3.5" />Back</button>
+                    <span className="text-[#1B2E6B]/20">|</span>
+                    <button onClick={()=>navigate({type:"home"})} className="hover:text-[#1B2E6B]">Dashboard</button>
                     <ChevronRight className="h-3.5 w-3.5" />
-                    <button onClick={()=>setView({type:"category",catId:c.id})} className="hover:text-[#1B2E6B]">{c.title}</button>
+                    <button onClick={()=>navigate({type:"category",catId:c.id})} className="hover:text-[#1B2E6B]">{c.title}</button>
                   </div>
                   <article className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-11">
                     {editing ? (
@@ -463,7 +517,7 @@ export default function App() {
                   </article>
                   {!editing && (
                     <div className="mt-5">
-                      <button onClick={()=>setView({type:"category",catId:c.id})} className="cba-nav flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-[#1B2E6B]"><ArrowLeft className="h-4 w-4"/>Back to {c.title}</button>
+                      <button onClick={()=>navigate({type:"category",catId:c.id})} className="cba-nav flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-[#1B2E6B]"><ArrowLeft className="h-4 w-4"/>Back to {c.title}</button>
                     </div>
                   )}
                 </div>
