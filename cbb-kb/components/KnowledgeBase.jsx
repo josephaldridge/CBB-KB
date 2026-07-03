@@ -356,7 +356,7 @@ export default function App() {
       <div className="mx-auto flex max-w-[1280px] gap-7 px-5 py-6">
         {/* ===== SIDEBAR ===== */}
         <aside className="hidden lg:block w-[264px] shrink-0">
-          <div className="sticky top-6">
+          <div className="sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto pr-1">
             <Logo />
             <div className="cba-eyebrow mt-7 text-[#1B2E6B]/70">Cowboy Academy</div>
             <h1 className="cba-display mt-2 text-[27px] leading-[1.08] text-[#1B2E6B]">Knowledge Base</h1>
