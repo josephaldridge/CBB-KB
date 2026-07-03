@@ -9,7 +9,7 @@ function client() {
   return _redis;
 }
 
-// One key holds the whole KB document (categories -> articles).
+// One key holds the whole KB document (departments -> categories -> articles).
 // Small enough (~50KB) that whole-document read/write is simplest and safe.
 export const KB_KEY = "cbb:kb:v2";
 
@@ -36,21 +36,27 @@ export async function writeKB(data) {
 }
 
 // Very lightweight shape check so a bad PUT can't corrupt the store.
+function isValidArticle(a) {
+  return typeof a.id === "string" && typeof a.title === "string" && typeof a.body === "string";
+}
+function isValidCategory(c) {
+  return (
+    typeof c.id === "string" &&
+    typeof c.title === "string" &&
+    Array.isArray(c.articles) &&
+    c.articles.every(isValidArticle)
+  );
+}
 export function isValidKB(data) {
   return (
     data &&
-    Array.isArray(data.categories) &&
-    data.categories.every(
-      (c) =>
-        typeof c.id === "string" &&
-        typeof c.title === "string" &&
-        Array.isArray(c.articles) &&
-        c.articles.every(
-          (a) =>
-            typeof a.id === "string" &&
-            typeof a.title === "string" &&
-            typeof a.body === "string"
-        )
+    Array.isArray(data.departments) &&
+    data.departments.every(
+      (d) =>
+        typeof d.id === "string" &&
+        typeof d.title === "string" &&
+        Array.isArray(d.categories) &&
+        d.categories.every(isValidCategory)
     )
   );
 }

@@ -62,15 +62,17 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 // ---- view <-> URL ----
 function viewToQuery(v) {
-  if (v.type === "category") return `?view=category&cat=${encodeURIComponent(v.catId)}`;
-  if (v.type === "article") return `?view=article&cat=${encodeURIComponent(v.catId)}&art=${encodeURIComponent(v.artId)}`;
+  if (v.type === "department") return `?view=department&dept=${encodeURIComponent(v.deptId)}`;
+  if (v.type === "category") return `?view=category&dept=${encodeURIComponent(v.deptId)}&cat=${encodeURIComponent(v.catId)}`;
+  if (v.type === "article") return `?view=article&dept=${encodeURIComponent(v.deptId)}&cat=${encodeURIComponent(v.catId)}&art=${encodeURIComponent(v.artId)}`;
   return "";
 }
 function queryToView(search) {
   const p = new URLSearchParams(search);
   const type = p.get("view");
-  if (type === "category" && p.get("cat")) return { type: "category", catId: p.get("cat") };
-  if (type === "article" && p.get("cat") && p.get("art")) return { type: "article", catId: p.get("cat"), artId: p.get("art") };
+  if (type === "department" && p.get("dept")) return { type: "department", deptId: p.get("dept") };
+  if (type === "category" && p.get("dept") && p.get("cat")) return { type: "category", deptId: p.get("dept"), catId: p.get("cat") };
+  if (type === "article" && p.get("dept") && p.get("cat") && p.get("art")) return { type: "article", deptId: p.get("dept"), catId: p.get("cat"), artId: p.get("art") };
   return { type: "home" };
 }
 
@@ -79,7 +81,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState({ type: "home" }); // home | category | article
+  const [view, setView] = useState({ type: "home" }); // home | department | category | article
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ title: "", body: "" });
   const [toast, setToast] = useState("");
@@ -172,41 +174,44 @@ export default function App() {
   };
 
   // ---- helpers ----
-  const findCategory = (id) => data?.categories.find((c) => c.id === id);
-  const findArticle = (catId, artId) => findCategory(catId)?.articles.find((a) => a.id === artId);
+  const findDept = (deptId) => data?.departments.find((d) => d.id === deptId);
+  const findCategory = (deptId, catId) => findDept(deptId)?.categories.find((c) => c.id === catId);
+  const findArticle = (deptId, catId, artId) => findCategory(deptId, catId)?.articles.find((a) => a.id === artId);
+  const deptArticleCount = (d) => d.categories.reduce((n, c) => n + c.articles.length, 0);
 
   const totalArticles = useMemo(
-    () => data ? data.categories.reduce((n, c) => n + c.articles.length, 0) : 0, [data]);
+    () => data ? data.departments.reduce((n, d) => n + deptArticleCount(d), 0) : 0, [data]);
 
   const searchResults = useMemo(() => {
     if (!data || query.trim().length < 2) return [];
     const q = query.toLowerCase();
     const hits = [];
-    for (const c of data.categories)
-      for (const a of c.articles) {
-        const inTitle = a.title.toLowerCase().includes(q);
-        const inBody = a.body.toLowerCase().includes(q);
-        if (inTitle || inBody) {
-          let snippet = "";
-          if (inBody) {
-            const idx = a.body.toLowerCase().indexOf(q);
-            const start = Math.max(0, idx - 40);
-            snippet = (start > 0 ? "…" : "") + a.body.slice(start, idx + 80).replace(/\n/g, " ") + "…";
+    for (const dept of data.departments)
+      for (const cat of dept.categories)
+        for (const a of cat.articles) {
+          const inTitle = a.title.toLowerCase().includes(q);
+          const inBody = a.body.toLowerCase().includes(q);
+          if (inTitle || inBody) {
+            let snippet = "";
+            if (inBody) {
+              const idx = a.body.toLowerCase().indexOf(q);
+              const start = Math.max(0, idx - 40);
+              snippet = (start > 0 ? "…" : "") + a.body.slice(start, idx + 80).replace(/\n/g, " ") + "…";
+            }
+            hits.push({ dept, cat, art: a, snippet });
           }
-          hits.push({ cat: c, art: a, snippet });
         }
-      }
     return hits;
   }, [data, query]);
 
-  // ---- CRUD ----
-  const openArticle = (catId, artId) => { navigate({ type: "article", catId, artId }); if (typeof window !== "undefined") window.scrollTo(0, 0); };
+  // ---- CRUD: articles ----
+  const openArticle = (deptId, catId, artId) => { navigate({ type: "article", deptId, catId, artId }); if (typeof window !== "undefined") window.scrollTo(0, 0); };
 
   const startEdit = (art) => { if (!ensurePasscode()) return; setDraft({ title: art.title, body: art.body }); setEditing(true); };
 
   const saveEdit = async () => {
     const next = structuredClone(data);
-    const c = next.categories.find((x) => x.id === view.catId);
+    const c = next.departments.find((x) => x.id === view.deptId).categories.find((x) => x.id === view.catId);
     const a = c.articles.find((x) => x.id === view.artId);
     a.title = draft.title.trim() || "Untitled";
     a.body = draft.body;
@@ -214,51 +219,86 @@ export default function App() {
     if (ok) { setEditing(false); flash("Article saved"); }
   };
 
-  const deleteArticle = async (catId, artId) => {
+  const deleteArticle = async (deptId, catId, artId) => {
     if (!ensurePasscode()) return;
     const next = structuredClone(data);
-    const c = next.categories.find((x) => x.id === catId);
+    const c = next.departments.find((x) => x.id === deptId).categories.find((x) => x.id === catId);
     c.articles = c.articles.filter((a) => a.id !== artId);
     const ok = await persist(next);
-    if (ok) { navigate({ type: "category", catId }); flash("Article deleted"); }
+    if (ok) { navigate({ type: "category", deptId, catId }); flash("Article deleted"); }
   };
 
-  const addArticle = (catId) => {
+  const addArticle = (deptId, catId) => {
     if (!ensurePasscode()) return;
     const next = structuredClone(data);
-    const c = next.categories.find((x) => x.id === catId);
+    const c = next.departments.find((x) => x.id === deptId).categories.find((x) => x.id === catId);
     const id = uid();
     c.articles.push({ id, title: "New article", body: "Write the content here." });
     persist(next);
-    navigate({ type: "article", catId, artId: id });
+    navigate({ type: "article", deptId, catId, artId: id });
     setDraft({ title: "New article", body: "Write the content here." });
     setEditing(true);
   };
 
-  const addCategory = () => {
+  // ---- CRUD: categories (within a department) ----
+  const [editCategory, setEditCategory] = useState(null);
+
+  const addCategory = (deptId) => {
     if (!ensurePasscode()) return;
     const next = structuredClone(data);
+    const dept = next.departments.find((x) => x.id === deptId);
     const id = uid();
-    next.categories.push({ id, title: "New category", desc: "Describe this category.", articles: [] });
+    dept.categories.push({ id, title: "New category", desc: "Describe this category.", articles: [] });
     persist(next);
-    navigate({ type: "category", catId: id });
+    navigate({ type: "category", deptId, catId: id });
     flash("Category added — use Edit to rename it");
   };
 
-  const [editCat, setEditCat] = useState(null);
-  const saveCat = async () => {
+  const saveCategory = async () => {
     const next = structuredClone(data);
-    const c = next.categories.find((x) => x.id === editCat.id);
-    c.title = editCat.title.trim() || "Untitled category";
-    c.desc = editCat.desc;
+    const dept = next.departments.find((x) => x.id === editCategory.deptId);
+    const c = dept.categories.find((x) => x.id === editCategory.id);
+    c.title = editCategory.title.trim() || "Untitled category";
+    c.desc = editCategory.desc;
     const ok = await persist(next);
-    if (ok) { setEditCat(null); flash("Category updated"); }
+    if (ok) { setEditCategory(null); flash("Category updated"); }
   };
-  const deleteCat = async (id) => {
+
+  const deleteCategory = async (deptId, catId) => {
     const next = structuredClone(data);
-    next.categories = next.categories.filter((c) => c.id !== id);
+    const dept = next.departments.find((x) => x.id === deptId);
+    dept.categories = dept.categories.filter((c) => c.id !== catId);
     const ok = await persist(next);
-    if (ok) { setEditCat(null); navigate({ type: "home" }); flash("Category deleted"); }
+    if (ok) { setEditCategory(null); navigate({ type: "department", deptId }); flash("Category deleted"); }
+  };
+
+  // ---- CRUD: departments ----
+  const [editDept, setEditDept] = useState(null);
+
+  const addDepartment = () => {
+    if (!ensurePasscode()) return;
+    const next = structuredClone(data);
+    const id = uid();
+    next.departments.push({ id, title: "New department", desc: "Describe this department.", categories: [] });
+    persist(next);
+    navigate({ type: "department", deptId: id });
+    flash("Department added — use Edit to rename it");
+  };
+
+  const saveDept = async () => {
+    const next = structuredClone(data);
+    const d = next.departments.find((x) => x.id === editDept.id);
+    d.title = editDept.title.trim() || "Untitled department";
+    d.desc = editDept.desc;
+    const ok = await persist(next);
+    if (ok) { setEditDept(null); flash("Department updated"); }
+  };
+
+  const deleteDept = async (id) => {
+    const next = structuredClone(data);
+    next.departments = next.departments.filter((d) => d.id !== id);
+    const ok = await persist(next);
+    if (ok) { setEditDept(null); navigate({ type: "home" }); flash("Department deleted"); }
   };
 
   const resetAll = async () => {
@@ -297,7 +337,7 @@ export default function App() {
     "cat-terms": Book, "cat-it": Wrench,
   };
   const FALLBACK_ICONS = [Folder, FileText, BookOpen, Home];
-  const activeCatId = view.type === "category" ? view.catId : view.type === "article" ? view.catId : null;
+  const activeDeptId = view.type === "department" || view.type === "category" || view.type === "article" ? view.deptId : null;
 
   const Logo = () => (
     <button onClick={() => { navigate({ type: "home" }); setQuery(""); }} className="block text-left">
@@ -333,21 +373,21 @@ export default function App() {
             </button>
 
             <div className="mt-5 space-y-0.5">
-              {data.categories.map((c) => {
-                const Icon = ICON_MAP[c.id] || FALLBACK_ICONS[0];
-                const active = activeCatId === c.id;
+              {data.departments.map((d) => {
+                const Icon = ICON_MAP[d.id] || FALLBACK_ICONS[0];
+                const active = activeDeptId === d.id;
                 return (
-                  <button key={c.id} onClick={() => navigate({ type: "category", catId: c.id })}
+                  <button key={d.id} onClick={() => navigate({ type: "department", deptId: d.id })}
                     className={"flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left transition " + (active ? "bg-[#1B2E6B]/8 text-[#1B2E6B]" : "text-slate-500 hover:bg-[#1B2E6B]/5 hover:text-[#1B2E6B]")}>
                     <Icon className={"h-4 w-4 shrink-0 " + (active ? "text-[#1B2E6B]" : "text-slate-400")} />
-                    <span className="cba-nav flex-1 truncate">{c.title}</span>
-                    {c.articles.length > 0 && <span className="cba-eyebrow text-[10px] text-slate-400">{c.articles.length}</span>}
+                    <span className="cba-nav flex-1 truncate">{d.title}</span>
+                    {deptArticleCount(d) > 0 && <span className="cba-eyebrow text-[10px] text-slate-400">{deptArticleCount(d)}</span>}
                   </button>
                 );
               })}
             </div>
-            <button onClick={addCategory} className="mt-3 flex w-full items-center gap-2 rounded-xl px-4 py-2.5 text-slate-400 transition hover:text-[#1B2E6B]">
-              <Plus className="h-4 w-4" /><span className="cba-nav">New category</span>
+            <button onClick={addDepartment} className="mt-3 flex w-full items-center gap-2 rounded-xl px-4 py-2.5 text-slate-400 transition hover:text-[#1B2E6B]">
+              <Plus className="h-4 w-4" /><span className="cba-nav">New department</span>
             </button>
           </div>
         </aside>
@@ -371,10 +411,10 @@ export default function App() {
             <div>
               <p className="cba-body mb-5 text-slate-500">{searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for "<span className="font-semibold text-[#1B2E6B]">{query}</span>"</p>
               <div className="space-y-3">
-                {searchResults.map(({ cat, art, snippet }) => (
-                  <button key={cat.id + art.id} onClick={() => { openArticle(cat.id, art.id); setQuery(""); }}
+                {searchResults.map(({ dept, cat, art, snippet }) => (
+                  <button key={dept.id + cat.id + art.id} onClick={() => { openArticle(dept.id, cat.id, art.id); setQuery(""); }}
                     className="block w-full rounded-2xl border border-[#1B2E6B]/8 bg-white p-5 text-left shadow-sm transition hover:border-[#1B2E6B]/25 hover:shadow-md">
-                    <div className="cba-eyebrow mb-1 text-[#1B2E6B]/60">{cat.title}</div>
+                    <div className="cba-eyebrow mb-1 text-[#1B2E6B]/60">{dept.title} · {cat.title}</div>
                     <div className="cba-display text-[19px] text-[#1B2E6B]">{art.title}</div>
                     {snippet && <div className="cba-body mt-1.5 text-[13.5px] text-slate-500">{snippet}</div>}
                   </button>
@@ -388,35 +428,37 @@ export default function App() {
               <div className="rounded-3xl bg-white p-9 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-12">
                 <div className="cba-eyebrow text-[#1B2E6B]/60">Cowboy Bail Bonds · Internal Reference</div>
                 <h1 className="cba-display mt-4 text-[40px] leading-[1.05] text-[#1B2E6B] sm:text-[52px]">How can<br/>we help?</h1>
-                <p className="cba-body mt-5 max-w-xl text-[15.5px] text-slate-500">The complete operational playbook — customer journey, sales, and every ePros stage, plus department guides. {totalArticles} articles across {data.categories.length} guides.</p>
+                <p className="cba-body mt-5 max-w-xl text-[15.5px] text-slate-500">The complete operational playbook — customer journey, sales, and every ePros stage, plus department guides. {totalArticles} articles across {data.departments.length} guides.</p>
               </div>
 
               <div className="mb-4 mt-10 flex items-center justify-between">
                 <h2 className="cba-eyebrow text-[#1B2E6B]/70">Browse the guides</h2>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                {data.categories.map((c) => {
-                  const Icon = ICON_MAP[c.id] || FALLBACK_ICONS[0];
+                {data.departments.map((d) => {
+                  const Icon = ICON_MAP[d.id] || FALLBACK_ICONS[0];
+                  const count = deptArticleCount(d);
                   return (
-                    <button key={c.id} onClick={() => navigate({ type: "category", catId: c.id })}
+                    <button key={d.id} onClick={() => navigate({ type: "department", deptId: d.id })}
                       className="group flex flex-col rounded-3xl border border-[#1B2E6B]/8 bg-white p-7 text-left shadow-sm transition hover:border-[#1B2E6B]/25 hover:shadow-md">
                       <div className="mb-4 flex items-center gap-3">
                         <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#1B2E6B]/6 text-[#1B2E6B] transition group-hover:bg-[#1B2E6B] group-hover:text-white"><Icon className="h-5 w-5" /></span>
-                        <span className="cba-eyebrow rounded-full border border-[#1B2E6B]/15 px-3 py-1 text-[10px] text-[#1B2E6B]/70">{c.articles.length} article{c.articles.length !== 1 ? "s" : ""}</span>
+                        <span className="cba-eyebrow rounded-full border border-[#1B2E6B]/15 px-3 py-1 text-[10px] text-[#1B2E6B]/70">{count} article{count !== 1 ? "s" : ""}</span>
                       </div>
-                      <h3 className="cba-display text-[22px] leading-tight text-[#1B2E6B]">{c.title}</h3>
-                      <p className="cba-body mt-2 text-[13.5px] text-slate-500">{c.desc}</p>
+                      <h3 className="cba-display text-[22px] leading-tight text-[#1B2E6B]">{d.title}</h3>
+                      <p className="cba-body mt-2 text-[13.5px] text-slate-500">{d.desc}</p>
                       <span className="cba-nav mt-5 inline-flex items-center gap-1.5 text-[#1B2E6B] transition-all group-hover:gap-2.5">Open guide <ChevronRight className="h-4 w-4" /></span>
                     </button>
                   );
                 })}
               </div>
             </div>
-          ) : view.type === "category" ? (
-            /* CATEGORY */
+          ) : view.type === "department" ? (
+            /* DEPARTMENT — shows its categories */
             (() => {
-              const c = findCategory(view.catId);
-              if (!c) return null;
+              const d = findDept(view.deptId);
+              if (!d) return null;
+              const count = deptArticleCount(d);
               return (
                 <div>
                   <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
@@ -424,17 +466,84 @@ export default function App() {
                     <span className="text-[#1B2E6B]/20">|</span>
                     <button onClick={() => navigate({ type: "home" })} className="hover:text-[#1B2E6B]">Dashboard</button>
                     <ChevronRight className="h-3.5 w-3.5" />
+                    <span className="text-[#1B2E6B]">{d.title}</span>
+                  </div>
+                  <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-10">
+                    {editDept && editDept.id === d.id ? (
+                      <div className="space-y-3">
+                        <input value={editDept.title} onChange={(e)=>setEditDept({...editDept,title:e.target.value})} className="cba-display w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 text-[32px] text-[#1B2E6B] outline-none focus:border-[#1B2E6B]/50" />
+                        <textarea value={editDept.desc} onChange={(e)=>setEditDept({...editDept,desc:e.target.value})} rows={2} className="cba-body w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 outline-none focus:border-[#1B2E6B]/50" />
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={saveDept} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white"><Check className="h-4 w-4"/>Save</button>
+                          <button onClick={()=>setEditDept(null)} className="cba-nav rounded-full border border-[#1B2E6B]/20 px-4 py-2 text-slate-500">Cancel</button>
+                          <button onClick={()=>{ if(confirm("Delete this whole department and all its categories and articles?")) deleteDept(d.id); }} className="cba-nav ml-auto flex items-center gap-1.5 rounded-full border border-red-200 px-4 py-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4"/>Delete department</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="cba-eyebrow text-[#1B2E6B]/60">{count} article{count !== 1 ? "s" : ""} · {d.categories.length} categor{d.categories.length !== 1 ? "ies" : "y"}</div>
+                          <h1 className="cba-display mt-2 text-[36px] leading-tight text-[#1B2E6B]">{d.title}</h1>
+                          <p className="cba-body mt-2 max-w-2xl text-slate-500">{d.desc}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <button onClick={()=>setEditDept({id:d.id,title:d.title,desc:d.desc})} className="cba-nav flex items-center gap-1.5 rounded-full border border-[#1B2E6B]/15 px-4 py-2 text-slate-500 hover:text-[#1B2E6B]"><Edit3 className="h-4 w-4"/>Edit</button>
+                          <button onClick={()=>addCategory(d.id)} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>New category</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {d.categories.length === 0 ? (
+                    <div className="mt-4 rounded-3xl border border-[#1B2E6B]/8 bg-white px-6 py-16 text-center shadow-sm">
+                      <p className="cba-serif text-[17px] italic text-slate-400">No categories here yet.</p>
+                      <button onClick={()=>addCategory(d.id)} className="cba-nav mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>Add the first category</button>
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      {d.categories.map((c) => (
+                        <button key={c.id} onClick={() => navigate({ type: "category", deptId: d.id, catId: c.id })}
+                          className="group flex flex-col rounded-3xl border border-[#1B2E6B]/8 bg-white p-7 text-left shadow-sm transition hover:border-[#1B2E6B]/25 hover:shadow-md">
+                          <div className="mb-4 flex items-center gap-3">
+                            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#1B2E6B]/6 text-[#1B2E6B] transition group-hover:bg-[#1B2E6B] group-hover:text-white"><Folder className="h-5 w-5" /></span>
+                            <span className="cba-eyebrow rounded-full border border-[#1B2E6B]/15 px-3 py-1 text-[10px] text-[#1B2E6B]/70">{c.articles.length} article{c.articles.length !== 1 ? "s" : ""}</span>
+                          </div>
+                          <h3 className="cba-display text-[22px] leading-tight text-[#1B2E6B]">{c.title}</h3>
+                          <p className="cba-body mt-2 text-[13.5px] text-slate-500">{c.desc}</p>
+                          <span className="cba-nav mt-5 inline-flex items-center gap-1.5 text-[#1B2E6B] transition-all group-hover:gap-2.5">Open category <ChevronRight className="h-4 w-4" /></span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          ) : view.type === "category" ? (
+            /* CATEGORY — shows its articles */
+            (() => {
+              const d = findDept(view.deptId);
+              const c = findCategory(view.deptId, view.catId);
+              if (!d || !c) return null;
+              return (
+                <div>
+                  <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
+                    <button onClick={goBack} className="flex items-center gap-1 hover:text-[#1B2E6B]"><ArrowLeft className="h-3.5 w-3.5" />Back</button>
+                    <span className="text-[#1B2E6B]/20">|</span>
+                    <button onClick={() => navigate({ type: "home" })} className="hover:text-[#1B2E6B]">Dashboard</button>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                    <button onClick={() => navigate({ type: "department", deptId: d.id })} className="hover:text-[#1B2E6B]">{d.title}</button>
+                    <ChevronRight className="h-3.5 w-3.5" />
                     <span className="text-[#1B2E6B]">{c.title}</span>
                   </div>
                   <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-10">
-                    {editCat && editCat.id === c.id ? (
+                    {editCategory && editCategory.id === c.id ? (
                       <div className="space-y-3">
-                        <input value={editCat.title} onChange={(e)=>setEditCat({...editCat,title:e.target.value})} className="cba-display w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 text-[32px] text-[#1B2E6B] outline-none focus:border-[#1B2E6B]/50" />
-                        <textarea value={editCat.desc} onChange={(e)=>setEditCat({...editCat,desc:e.target.value})} rows={2} className="cba-body w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 outline-none focus:border-[#1B2E6B]/50" />
+                        <input value={editCategory.title} onChange={(e)=>setEditCategory({...editCategory,title:e.target.value})} className="cba-display w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 text-[32px] text-[#1B2E6B] outline-none focus:border-[#1B2E6B]/50" />
+                        <textarea value={editCategory.desc} onChange={(e)=>setEditCategory({...editCategory,desc:e.target.value})} rows={2} className="cba-body w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 outline-none focus:border-[#1B2E6B]/50" />
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={saveCat} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white"><Check className="h-4 w-4"/>Save</button>
-                          <button onClick={()=>setEditCat(null)} className="cba-nav rounded-full border border-[#1B2E6B]/20 px-4 py-2 text-slate-500">Cancel</button>
-                          <button onClick={()=>{ if(confirm("Delete this whole category and all its articles?")) deleteCat(c.id); }} className="cba-nav ml-auto flex items-center gap-1.5 rounded-full border border-red-200 px-4 py-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4"/>Delete category</button>
+                          <button onClick={saveCategory} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white"><Check className="h-4 w-4"/>Save</button>
+                          <button onClick={()=>setEditCategory(null)} className="cba-nav rounded-full border border-[#1B2E6B]/20 px-4 py-2 text-slate-500">Cancel</button>
+                          <button onClick={()=>{ if(confirm("Delete this whole category and all its articles?")) deleteCategory(d.id, c.id); }} className="cba-nav ml-auto flex items-center gap-1.5 rounded-full border border-red-200 px-4 py-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4"/>Delete category</button>
                         </div>
                       </div>
                     ) : (
@@ -445,8 +554,8 @@ export default function App() {
                           <p className="cba-body mt-2 max-w-2xl text-slate-500">{c.desc}</p>
                         </div>
                         <div className="flex shrink-0 gap-2">
-                          <button onClick={()=>setEditCat({id:c.id,title:c.title,desc:c.desc})} className="cba-nav flex items-center gap-1.5 rounded-full border border-[#1B2E6B]/15 px-4 py-2 text-slate-500 hover:text-[#1B2E6B]"><Edit3 className="h-4 w-4"/>Edit</button>
-                          <button onClick={()=>addArticle(c.id)} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>New article</button>
+                          <button onClick={()=>setEditCategory({deptId:d.id,id:c.id,title:c.title,desc:c.desc})} className="cba-nav flex items-center gap-1.5 rounded-full border border-[#1B2E6B]/15 px-4 py-2 text-slate-500 hover:text-[#1B2E6B]"><Edit3 className="h-4 w-4"/>Edit</button>
+                          <button onClick={()=>addArticle(d.id, c.id)} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-4 py-2 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>New article</button>
                         </div>
                       </div>
                     )}
@@ -454,7 +563,7 @@ export default function App() {
 
                   <div className="mt-4 overflow-hidden rounded-3xl border border-[#1B2E6B]/8 bg-white shadow-sm">
                     {c.articles.map((a, i) => (
-                      <button key={a.id} onClick={() => openArticle(c.id, a.id)}
+                      <button key={a.id} onClick={() => openArticle(d.id, c.id, a.id)}
                         className={"flex w-full items-center gap-4 px-6 py-4 text-left transition hover:bg-[#F5F2EB] " + (i !== 0 ? "border-t border-[#1B2E6B]/6" : "")}>
                         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#1B2E6B]/5 text-[#1B2E6B]"><FileText className="h-4 w-4" /></span>
                         <span className="cba-body flex-1 font-medium text-slate-700">{a.title}</span>
@@ -464,7 +573,7 @@ export default function App() {
                     {c.articles.length === 0 && (
                       <div className="px-6 py-16 text-center">
                         <p className="cba-serif text-[17px] italic text-slate-400">No articles here yet.</p>
-                        <button onClick={()=>addArticle(c.id)} className="cba-nav mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>Write the first article</button>
+                        <button onClick={()=>addArticle(d.id, c.id)} className="cba-nav mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>Write the first article</button>
                       </div>
                     )}
                   </div>
@@ -474,9 +583,10 @@ export default function App() {
           ) : (
             /* ARTICLE */
             (() => {
-              const c = findCategory(view.catId);
-              const a = findArticle(view.catId, view.artId);
-              if (!c || !a) return null;
+              const d = findDept(view.deptId);
+              const c = findCategory(view.deptId, view.catId);
+              const a = findArticle(view.deptId, view.catId, view.artId);
+              if (!d || !c || !a) return null;
               return (
                 <div className="mx-auto max-w-3xl">
                   <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
@@ -484,7 +594,9 @@ export default function App() {
                     <span className="text-[#1B2E6B]/20">|</span>
                     <button onClick={()=>navigate({type:"home"})} className="hover:text-[#1B2E6B]">Dashboard</button>
                     <ChevronRight className="h-3.5 w-3.5" />
-                    <button onClick={()=>navigate({type:"category",catId:c.id})} className="hover:text-[#1B2E6B]">{c.title}</button>
+                    <button onClick={()=>navigate({type:"department",deptId:d.id})} className="hover:text-[#1B2E6B]">{d.title}</button>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                    <button onClick={()=>navigate({type:"category",deptId:d.id,catId:c.id})} className="hover:text-[#1B2E6B]">{c.title}</button>
                   </div>
                   <article className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-[#1B2E6B]/6 sm:p-11">
                     {editing ? (
@@ -502,12 +614,12 @@ export default function App() {
                       </div>
                     ) : (
                       <div>
-                        <div className="cba-eyebrow text-[#1B2E6B]/60">{c.title}</div>
+                        <div className="cba-eyebrow text-[#1B2E6B]/60">{d.title} · {c.title}</div>
                         <div className="mt-3 flex items-start justify-between gap-4">
                           <h1 className="cba-display text-[34px] leading-[1.08] text-[#1B2E6B] sm:text-[40px]">{a.title}</h1>
                           <div className="flex shrink-0 gap-1.5">
                             <button onClick={()=>startEdit(a)} title="Edit" className="grid h-10 w-10 place-items-center rounded-full border border-[#1B2E6B]/12 text-slate-400 hover:border-[#1B2E6B]/30 hover:text-[#1B2E6B]"><Edit3 className="h-4 w-4"/></button>
-                            <button onClick={()=>{ if(confirm("Delete this article?")) deleteArticle(c.id,a.id); }} title="Delete" className="grid h-10 w-10 place-items-center rounded-full border border-[#1B2E6B]/12 text-slate-400 hover:border-red-300 hover:text-red-600"><Trash2 className="h-4 w-4"/></button>
+                            <button onClick={()=>{ if(confirm("Delete this article?")) deleteArticle(d.id,c.id,a.id); }} title="Delete" className="grid h-10 w-10 place-items-center rounded-full border border-[#1B2E6B]/12 text-slate-400 hover:border-red-300 hover:text-red-600"><Trash2 className="h-4 w-4"/></button>
                           </div>
                         </div>
                         <div className="mt-6 mb-2 h-px w-full bg-[#1B2E6B]/10" />
@@ -517,7 +629,7 @@ export default function App() {
                   </article>
                   {!editing && (
                     <div className="mt-5">
-                      <button onClick={()=>navigate({type:"category",catId:c.id})} className="cba-nav flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-[#1B2E6B]"><ArrowLeft className="h-4 w-4"/>Back to {c.title}</button>
+                      <button onClick={()=>navigate({type:"category",deptId:d.id,catId:c.id})} className="cba-nav flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-[#1B2E6B]"><ArrowLeft className="h-4 w-4"/>Back to {c.title}</button>
                     </div>
                   )}
                 </div>
@@ -536,4 +648,3 @@ export default function App() {
     </div>
   );
 }
-
