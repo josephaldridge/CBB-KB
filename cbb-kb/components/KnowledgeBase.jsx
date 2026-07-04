@@ -25,7 +25,11 @@ function Markdown({ text }) {
   while (i < lines.length) {
     const line = lines[i];
     if (line.trim() === "") { i++; continue; }
-    if (line.startsWith("## ")) {
+    const imgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      blocks.push(<img key={i} src={imgMatch[2]} alt={imgMatch[1]} className="my-4 w-full rounded-2xl border border-[#1B2E6B]/10 shadow-sm" />);
+      i++;
+    } else if (line.startsWith("## ")) {
       blocks.push(<h3 key={i} className="cba-eyebrow mt-9 mb-3 text-[#1B2E6B]">{line.slice(3)}</h3>);
       i++;
     } else if (/^\s*-\s+/.test(line)) {
