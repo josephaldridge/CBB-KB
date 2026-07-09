@@ -9,7 +9,9 @@ function client() {
   return _redis;
 }
 
-// One key holds the whole KB document (departments -> categories -> articles).
+// One key holds the whole KB document: departments -> categories -> articleIds,
+// plus a flat `articles` map keyed by id. Categories reference articles by id
+// (rather than embedding them) so one article can live in multiple categories.
 // Small enough (~50KB) that whole-document read/write is simplest and safe.
 export const KB_KEY = "cbb:kb:v2";
 
@@ -43,8 +45,8 @@ function isValidCategory(c) {
   return (
     typeof c.id === "string" &&
     typeof c.title === "string" &&
-    Array.isArray(c.articles) &&
-    c.articles.every(isValidArticle)
+    Array.isArray(c.articleIds) &&
+    c.articleIds.every((id) => typeof id === "string")
   );
 }
 export function isValidKB(data) {
@@ -57,7 +59,11 @@ export function isValidKB(data) {
         typeof d.title === "string" &&
         Array.isArray(d.categories) &&
         d.categories.every(isValidCategory)
-    )
+    ) &&
+    data.articles &&
+    typeof data.articles === "object" &&
+    !Array.isArray(data.articles) &&
+    Object.values(data.articles).every(isValidArticle)
   );
 }
 

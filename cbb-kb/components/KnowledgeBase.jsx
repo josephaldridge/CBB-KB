@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Search, ChevronRight, Edit3, Trash2, Plus, Save, X, BookOpen, FileText, Folder, Home, ArrowLeft, Download, RotateCcw, Check, ShieldCheck, Globe, CheckCircle, Gavel, DollarSign, HelpCircle, Book, Wrench, Users, Lock } from "lucide-react";
+import { Search, ChevronRight, Edit3, Trash2, Plus, Save, X, BookOpen, FileText, Folder, Home, ArrowLeft, Download, RotateCcw, Check, ShieldCheck, Globe, CheckCircle, Gavel, DollarSign, HelpCircle, Book, Wrench, Users, Lock, Sparkles } from "lucide-react";
 
 function renderInline(text) {
   // bold **x**
@@ -63,6 +63,7 @@ function Markdown({ text }) {
 }
 
 const uid = () => Math.random().toString(36).slice(2, 9);
+const catKey = (deptId, catId) => deptId + "::" + catId;
 
 // ---- view <-> URL ----
 function viewToQuery(v) {
@@ -180,11 +181,17 @@ export default function App() {
   // ---- helpers ----
   const findDept = (deptId) => data?.departments.find((d) => d.id === deptId);
   const findCategory = (deptId, catId) => findDept(deptId)?.categories.find((c) => c.id === catId);
-  const findArticle = (deptId, catId, artId) => findCategory(deptId, catId)?.articles.find((a) => a.id === artId);
-  const deptArticleCount = (d) => d.categories.reduce((n, c) => n + c.articles.length, 0);
+  const getArticle = (artId) => data?.articles[artId];
+  const findArticle = (deptId, catId, artId) => {
+    const c = findCategory(deptId, catId);
+    if (!c || !c.articleIds.includes(artId)) return null;
+    return getArticle(artId);
+  };
+  const categoryArticles = (c) => c.articleIds.map(getArticle).filter(Boolean);
+  const deptArticleCount = (d) => new Set(d.categories.flatMap((c) => c.articleIds)).size;
 
   const totalArticles = useMemo(
-    () => data ? data.departments.reduce((n, d) => n + deptArticleCount(d), 0) : 0, [data]);
+    () => (data ? Object.keys(data.articles).length : 0), [data]);
 
   const searchResults = useMemo(() => {
     if (!data || query.trim().length < 2) return [];
@@ -192,7 +199,9 @@ export default function App() {
     const hits = [];
     for (const dept of data.departments)
       for (const cat of dept.categories)
-        for (const a of cat.articles) {
+        for (const artId of cat.articleIds) {
+          const a = data.articles[artId];
+          if (!a) continue;
           const inTitle = a.title.toLowerCase().includes(q);
           const inBody = a.body.toLowerCase().includes(q);
           if (inTitle || inBody) {
@@ -215,19 +224,21 @@ export default function App() {
 
   const saveEdit = async () => {
     const next = structuredClone(data);
-    const c = next.departments.find((x) => x.id === view.deptId).categories.find((x) => x.id === view.catId);
-    const a = c.articles.find((x) => x.id === view.artId);
+    const a = next.articles[view.artId];
     a.title = draft.title.trim() || "Untitled";
     a.body = draft.body;
     const ok = await persist(next);
     if (ok) { setEditing(false); flash("Article saved"); }
   };
 
+  // Unlink from this category; if the article is no longer linked anywhere, remove it entirely.
   const deleteArticle = async (deptId, catId, artId) => {
     if (!ensurePasscode()) return;
     const next = structuredClone(data);
     const c = next.departments.find((x) => x.id === deptId).categories.find((x) => x.id === catId);
-    c.articles = c.articles.filter((a) => a.id !== artId);
+    c.articleIds = c.articleIds.filter((id) => id !== artId);
+    const stillLinked = next.departments.some((d) => d.categories.some((cc) => cc.articleIds.includes(artId)));
+    if (!stillLinked) delete next.articles[artId];
     const ok = await persist(next);
     if (ok) { navigate({ type: "category", deptId, catId }); flash("Article deleted"); }
   };
@@ -237,11 +248,55 @@ export default function App() {
     const next = structuredClone(data);
     const c = next.departments.find((x) => x.id === deptId).categories.find((x) => x.id === catId);
     const id = uid();
-    c.articles.push({ id, title: "New article", body: "Write the content here." });
+    next.articles[id] = { id, title: "New article", body: "Write the content here." };
+    c.articleIds.push(id);
     persist(next);
     navigate({ type: "article", deptId, catId, artId: id });
     setDraft({ title: "New article", body: "Write the content here." });
     setEditing(true);
+  };
+
+  // ---- KB Wizard: create an article and place it in one or more categories at once ----
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardTitle, setWizardTitle] = useState("");
+  const [wizardBody, setWizardBody] = useState("");
+  const [wizardSelected, setWizardSelected] = useState(() => new Set());
+
+  const openWizard = () => {
+    if (!ensurePasscode()) return;
+    setWizardTitle("");
+    setWizardBody("");
+    setWizardSelected(new Set());
+    setWizardOpen(true);
+  };
+
+  const toggleWizardCat = (deptId, catId) => {
+    const key = catKey(deptId, catId);
+    setWizardSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const createWizardArticle = async () => {
+    if (wizardSelected.size === 0) { flash("Select at least one category for this article."); return; }
+    const next = structuredClone(data);
+    const id = uid();
+    next.articles[id] = { id, title: wizardTitle.trim() || "Untitled", body: wizardBody };
+    const keys = [...wizardSelected];
+    for (const key of keys) {
+      const [deptId, catId] = key.split("::");
+      const c = next.departments.find((d) => d.id === deptId)?.categories.find((cc) => cc.id === catId);
+      if (c) c.articleIds.push(id);
+    }
+    const ok = await persist(next);
+    if (ok) {
+      setWizardOpen(false);
+      flash(`Article added to ${keys.length} categor${keys.length !== 1 ? "ies" : "y"}`);
+      const [firstDept, firstCat] = keys[0].split("::");
+      navigate({ type: "article", deptId: firstDept, catId: firstCat, artId: id });
+    }
   };
 
   // ---- CRUD: categories (within a department) ----
@@ -252,7 +307,7 @@ export default function App() {
     const next = structuredClone(data);
     const dept = next.departments.find((x) => x.id === deptId);
     const id = uid();
-    dept.categories.push({ id, title: "New category", desc: "Describe this category.", articles: [] });
+    dept.categories.push({ id, title: "New category", desc: "Describe this category.", articleIds: [] });
     persist(next);
     navigate({ type: "category", deptId, catId: id });
     flash("Category added — use Edit to rename it");
@@ -406,6 +461,7 @@ export default function App() {
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search all guides…"
                 className="cba-body w-full rounded-full border border-[#1B2E6B]/12 bg-white py-3 pl-11 pr-4 text-[14px] text-slate-700 placeholder-slate-400 shadow-sm outline-none focus:border-[#1B2E6B]/40" />
             </div>
+            <button onClick={openWizard} title="New article (KB Wizard)" className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#1B2E6B]/12 bg-[#1B2E6B] text-white shadow-sm hover:bg-[#24408f]"><Plus className="h-4 w-4" /></button>
             <button onClick={exportJSON} title="Export backup" className="hidden sm:grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#1B2E6B]/12 bg-white text-slate-500 shadow-sm hover:text-[#1B2E6B]"><Download className="h-4 w-4" /></button>
             <button onClick={() => { if (confirm("Reset all guides to the original content? Your edits will be lost.")) resetAll(); }} title="Reset" className="hidden sm:grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#1B2E6B]/12 bg-white text-slate-500 shadow-sm hover:text-[#1B2E6B]"><RotateCcw className="h-4 w-4" /></button>
           </div>
@@ -510,7 +566,7 @@ export default function App() {
                           className="group flex flex-col rounded-3xl border border-[#1B2E6B]/8 bg-white p-7 text-left shadow-sm transition hover:border-[#1B2E6B]/25 hover:shadow-md">
                           <div className="mb-4 flex items-center gap-3">
                             <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#1B2E6B]/6 text-[#1B2E6B] transition group-hover:bg-[#1B2E6B] group-hover:text-white"><Folder className="h-5 w-5" /></span>
-                            <span className="cba-eyebrow rounded-full border border-[#1B2E6B]/15 px-3 py-1 text-[10px] text-[#1B2E6B]/70">{c.articles.length} article{c.articles.length !== 1 ? "s" : ""}</span>
+                            <span className="cba-eyebrow rounded-full border border-[#1B2E6B]/15 px-3 py-1 text-[10px] text-[#1B2E6B]/70">{c.articleIds.length} article{c.articleIds.length !== 1 ? "s" : ""}</span>
                           </div>
                           <h3 className="cba-display text-[22px] leading-tight text-[#1B2E6B]">{c.title}</h3>
                           <p className="cba-body mt-2 text-[13.5px] text-slate-500">{c.desc}</p>
@@ -528,6 +584,7 @@ export default function App() {
               const d = findDept(view.deptId);
               const c = findCategory(view.deptId, view.catId);
               if (!d || !c) return null;
+              const articles = categoryArticles(c);
               return (
                 <div>
                   <div className="cba-nav mb-6 flex items-center gap-2 text-[13px] text-slate-400">
@@ -553,7 +610,7 @@ export default function App() {
                     ) : (
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div className="min-w-0">
-                          <div className="cba-eyebrow text-[#1B2E6B]/60">{c.articles.length} article{c.articles.length !== 1 ? "s" : ""}</div>
+                          <div className="cba-eyebrow text-[#1B2E6B]/60">{c.articleIds.length} article{c.articleIds.length !== 1 ? "s" : ""}</div>
                           <h1 className="cba-display mt-2 text-[36px] leading-tight text-[#1B2E6B]">{c.title}</h1>
                           <p className="cba-body mt-2 max-w-2xl text-slate-500">{c.desc}</p>
                         </div>
@@ -566,7 +623,7 @@ export default function App() {
                   </div>
 
                   <div className="mt-4 overflow-hidden rounded-3xl border border-[#1B2E6B]/8 bg-white shadow-sm">
-                    {c.articles.map((a, i) => (
+                    {articles.map((a, i) => (
                       <button key={a.id} onClick={() => openArticle(d.id, c.id, a.id)}
                         className={"flex w-full items-center gap-4 px-6 py-4 text-left transition hover:bg-[#F5F2EB] " + (i !== 0 ? "border-t border-[#1B2E6B]/6" : "")}>
                         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#1B2E6B]/5 text-[#1B2E6B]"><FileText className="h-4 w-4" /></span>
@@ -574,7 +631,7 @@ export default function App() {
                         <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
                       </button>
                     ))}
-                    {c.articles.length === 0 && (
+                    {articles.length === 0 && (
                       <div className="px-6 py-16 text-center">
                         <p className="cba-serif text-[17px] italic text-slate-400">No articles here yet.</p>
                         <button onClick={()=>addArticle(d.id, c.id)} className="cba-nav mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-white hover:bg-[#24408f]"><Plus className="h-4 w-4"/>Write the first article</button>
@@ -642,6 +699,67 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* ===== KB WIZARD ===== */}
+      {wizardOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#1B2E6B]/30 p-4" onClick={() => setWizardOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl ring-1 ring-[#1B2E6B]/10">
+            <div className="flex items-center justify-between border-b border-[#1B2E6B]/8 px-7 py-5">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-[#1B2E6B]/8 text-[#1B2E6B]"><Sparkles className="h-4 w-4" /></span>
+                <div>
+                  <div className="cba-eyebrow text-[#1B2E6B]/60">KB Wizard</div>
+                  <div className="cba-display text-[19px] leading-none text-[#1B2E6B]">New Article</div>
+                </div>
+              </div>
+              <button onClick={() => setWizardOpen(false)} className="grid h-9 w-9 place-items-center rounded-full text-slate-400 hover:bg-[#1B2E6B]/5 hover:text-[#1B2E6B]"><X className="h-4 w-4" /></button>
+            </div>
+
+            <div className="overflow-y-auto px-7 py-6">
+              <label className="cba-eyebrow mb-2 block text-[#1B2E6B]/60">Title</label>
+              <input value={wizardTitle} onChange={(e)=>setWizardTitle(e.target.value)} placeholder="Article title"
+                className="cba-display mb-5 w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-2.5 text-[20px] text-[#1B2E6B] outline-none focus:border-[#1B2E6B]/50" />
+
+              <label className="cba-eyebrow mb-2 block text-[#1B2E6B]/60">Content — ## heading · - bullet · 1. numbered · **bold**</label>
+              <textarea value={wizardBody} onChange={(e)=>setWizardBody(e.target.value)} rows={10} placeholder="Write the content here."
+                className="mb-6 w-full resize-y rounded-xl border border-[#1B2E6B]/20 px-4 py-3 text-[13px] leading-relaxed text-slate-700 outline-none focus:border-[#1B2E6B]/50" style={{fontFamily:"'IBM Plex Mono', ui-monospace, monospace"}} />
+
+              <label className="cba-eyebrow mb-3 block text-[#1B2E6B]/60">Where does this live? Select one or more categories.</label>
+              <div className="max-h-64 space-y-4 overflow-y-auto rounded-xl border border-[#1B2E6B]/10 bg-[#F5F2EB]/60 p-4">
+                {data.departments.filter((d) => d.categories.length > 0).map((d) => (
+                  <div key={d.id}>
+                    <div className="cba-eyebrow mb-1.5 text-[#1B2E6B]/70">{d.title}</div>
+                    <div className="space-y-1">
+                      {d.categories.map((c) => {
+                        const key = catKey(d.id, c.id);
+                        const checked = wizardSelected.has(key);
+                        return (
+                          <label key={c.id} className={"flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition " + (checked ? "bg-[#1B2E6B]/8" : "hover:bg-[#1B2E6B]/5")}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleWizardCat(d.id, c.id)}
+                              className="h-4 w-4 rounded border-[#1B2E6B]/30 text-[#1B2E6B] focus:ring-[#1B2E6B]/40" />
+                            <span className="cba-body text-[14px] text-slate-700">{c.title}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {data.departments.every((d) => d.categories.length === 0) && (
+                  <p className="cba-body text-[13.5px] text-slate-400">No categories exist yet — add one from a department page first.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 border-t border-[#1B2E6B]/8 px-7 py-5">
+              <span className="cba-body text-[13px] text-slate-400">{wizardSelected.size} categor{wizardSelected.size !== 1 ? "ies" : "y"} selected</span>
+              <div className="flex gap-2">
+                <button onClick={() => setWizardOpen(false)} className="cba-nav rounded-full border border-[#1B2E6B]/20 px-4 py-2 text-slate-500">Cancel</button>
+                <button onClick={createWizardArticle} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2 text-white hover:bg-[#24408f]"><Save className="h-4 w-4"/>Create Article</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* toast + save indicator */}
       {(toast || saving) && (
