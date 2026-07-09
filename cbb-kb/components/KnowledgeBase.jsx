@@ -260,31 +260,31 @@ export default function App() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardTitle, setWizardTitle] = useState("");
   const [wizardBody, setWizardBody] = useState("");
-  const [wizardSelected, setWizardSelected] = useState(() => new Set());
+  // Array of catKey strings, one per dropdown row ("" = row not chosen yet).
+  const [wizardSelections, setWizardSelections] = useState([""]);
 
   const openWizard = () => {
     if (!ensurePasscode()) return;
     setWizardTitle("");
     setWizardBody("");
-    setWizardSelected(new Set());
+    setWizardSelections([""]);
     setWizardOpen(true);
   };
 
-  const toggleWizardCat = (deptId, catId) => {
-    const key = catKey(deptId, catId);
-    setWizardSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
+  const wizardChosen = [...new Set(wizardSelections.filter(Boolean))];
+
+  const setWizardRow = (idx, value) => {
+    setWizardSelections((prev) => prev.map((v, i) => (i === idx ? value : v)));
   };
+  const addWizardRow = () => setWizardSelections((prev) => [...prev, ""]);
+  const removeWizardRow = (idx) => setWizardSelections((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : [""]));
 
   const createWizardArticle = async () => {
-    if (wizardSelected.size === 0) { flash("Select at least one category for this article."); return; }
+    if (wizardChosen.length === 0) { flash("Select at least one category for this article."); return; }
     const next = structuredClone(data);
     const id = uid();
     next.articles[id] = { id, title: wizardTitle.trim() || "Untitled", body: wizardBody };
-    const keys = [...wizardSelected];
+    const keys = wizardChosen;
     for (const key of keys) {
       const [deptId, catId] = key.split("::");
       const c = next.departments.find((d) => d.id === deptId)?.categories.find((cc) => cc.id === catId);
@@ -400,13 +400,7 @@ export default function App() {
 
   const Logo = () => (
     <button onClick={() => { navigate({ type: "home" }); setQuery(""); }} className="block text-left">
-      <div className="flex items-center gap-2.5">
-        <span className="grid h-10 w-10 place-items-center text-[#1B2E6B]" style={{fontSize:"30px",lineHeight:1}}>★</span>
-        <div className="leading-none">
-          <div className="cba-logo text-[19px] text-[#1B2E6B]">COWBOY</div>
-          <div className="cba-eyebrow text-[9px] text-[#1B2E6B]/70 mt-0.5">BAIL BONDS</div>
-        </div>
-      </div>
+      <img src="/brand/logo-blue.svg" alt="Cowboy Bail Bonds" className="h-12 w-auto" />
     </button>
   );
 
@@ -724,34 +718,45 @@ export default function App() {
               <textarea value={wizardBody} onChange={(e)=>setWizardBody(e.target.value)} rows={10} placeholder="Write the content here."
                 className="mb-6 w-full resize-y rounded-xl border border-[#1B2E6B]/20 px-4 py-3 text-[13px] leading-relaxed text-slate-700 outline-none focus:border-[#1B2E6B]/50" style={{fontFamily:"'IBM Plex Mono', ui-monospace, monospace"}} />
 
-              <label className="cba-eyebrow mb-3 block text-[#1B2E6B]/60">Where does this live? Select one or more categories.</label>
-              <div className="max-h-64 space-y-4 overflow-y-auto rounded-xl border border-[#1B2E6B]/10 bg-[#F5F2EB]/60 p-4">
-                {data.departments.filter((d) => d.categories.length > 0).map((d) => (
-                  <div key={d.id}>
-                    <div className="cba-eyebrow mb-1.5 text-[#1B2E6B]/70">{d.title}</div>
-                    <div className="space-y-1">
-                      {d.categories.map((c) => {
-                        const key = catKey(d.id, c.id);
-                        const checked = wizardSelected.has(key);
-                        return (
-                          <label key={c.id} className={"flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition " + (checked ? "bg-[#1B2E6B]/8" : "hover:bg-[#1B2E6B]/5")}>
-                            <input type="checkbox" checked={checked} onChange={() => toggleWizardCat(d.id, c.id)}
-                              className="h-4 w-4 rounded border-[#1B2E6B]/30 text-[#1B2E6B] focus:ring-[#1B2E6B]/40" />
-                            <span className="cba-body text-[14px] text-slate-700">{c.title}</span>
-                          </label>
-                        );
-                      })}
+              <label className="cba-eyebrow mb-3 block text-[#1B2E6B]/60">Select one or more categories where this article will be located</label>
+              {data.departments.every((d) => d.categories.length === 0) ? (
+                <p className="cba-body text-[13.5px] text-slate-400">No categories exist yet — add one from a department page first.</p>
+              ) : (
+                <div className="space-y-2">
+                  {wizardSelections.map((sel, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <select value={sel} onChange={(e) => setWizardRow(idx, e.target.value)}
+                        className="cba-body w-full appearance-none rounded-xl border border-[#1B2E6B]/20 bg-white px-4 py-2.5 text-[14px] text-slate-700 outline-none focus:border-[#1B2E6B]/50">
+                        <option value="">Choose a category…</option>
+                        {data.departments.filter((d) => d.categories.length > 0).map((d) => (
+                          <optgroup key={d.id} label={d.title}>
+                            {d.categories.map((c) => {
+                              const key = catKey(d.id, c.id);
+                              return (
+                                <option key={c.id} value={key} disabled={wizardSelections.includes(key) && sel !== key}>
+                                  {c.title}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        ))}
+                      </select>
+                      {wizardSelections.length > 1 && (
+                        <button onClick={() => removeWizardRow(idx)} title="Remove"
+                          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-[#1B2E6B]/5 hover:text-red-600"><X className="h-4 w-4" /></button>
+                      )}
                     </div>
-                  </div>
-                ))}
-                {data.departments.every((d) => d.categories.length === 0) && (
-                  <p className="cba-body text-[13.5px] text-slate-400">No categories exist yet — add one from a department page first.</p>
-                )}
-              </div>
+                  ))}
+                  <button onClick={addWizardRow} disabled={wizardSelections.some((v) => !v)}
+                    className="cba-nav flex items-center gap-1.5 rounded-full px-3 py-2 text-[13px] text-[#1B2E6B] hover:bg-[#1B2E6B]/5 disabled:cursor-not-allowed disabled:opacity-40">
+                    <Plus className="h-4 w-4" /> Add another category
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between gap-2 border-t border-[#1B2E6B]/8 px-7 py-5">
-              <span className="cba-body text-[13px] text-slate-400">{wizardSelected.size} categor{wizardSelected.size !== 1 ? "ies" : "y"} selected</span>
+              <span className="cba-body text-[13px] text-slate-400">{wizardChosen.length} categor{wizardChosen.length !== 1 ? "ies" : "y"} selected</span>
               <div className="flex gap-2">
                 <button onClick={() => setWizardOpen(false)} className="cba-nav rounded-full border border-[#1B2E6B]/20 px-4 py-2 text-slate-500">Cancel</button>
                 <button onClick={createWizardArticle} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2 text-white hover:bg-[#24408f]"><Save className="h-4 w-4"/>Create Article</button>
