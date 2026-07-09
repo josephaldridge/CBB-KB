@@ -409,46 +409,52 @@ export default function App() {
       <div className="mx-auto flex max-w-[1280px] gap-7 px-5 py-6">
         {/* ===== SIDEBAR ===== */}
         <aside className="hidden lg:block w-[264px] shrink-0">
-          <div className="sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto pr-1">
-            <Logo />
-            <div className="cba-eyebrow mt-7 text-[#1B2E6B]/70">Cowboy Academy</div>
-            <h1 className="cba-display mt-2 text-[27px] leading-[1.08] text-[#1B2E6B]">Knowledge Base</h1>
-            <p className="cba-serif mt-3 text-[14px] italic leading-relaxed text-slate-500">"Helping, Caring, and Guiding the People we Serve"</p>
-            <div className="mt-5 flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#1B2E6B]" />
-              <span className="cba-eyebrow text-[10px] text-[#1B2E6B]/70">Operational Playbook</span>
+          <div className="sticky top-6 flex max-h-[calc(100vh-3rem)] flex-col">
+            {/* static header — logo through All Guides never scrolls */}
+            <div className="shrink-0">
+              <Logo />
+              <div className="cba-eyebrow mt-7 text-[#1B2E6B]/70">Cowboy Academy</div>
+              <h1 className="cba-display mt-2 text-[27px] leading-[1.08] text-[#1B2E6B]">Knowledge Base</h1>
+              <p className="cba-serif mt-3 text-[14px] italic leading-relaxed text-slate-500">"Helping, Caring, and Guiding the People we Serve"</p>
+              <div className="mt-5 flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#1B2E6B]" />
+                <span className="cba-eyebrow text-[10px] text-[#1B2E6B]/70">Operational Playbook</span>
+              </div>
+
+              <button onClick={() => { navigate({ type: "home" }); setQuery(""); }}
+                className={"mt-7 flex w-full items-center gap-3 rounded-2xl px-5 py-4 transition " + (view.type === "home" ? "bg-[#1B2E6B] text-white shadow-md" : "bg-white text-[#1B2E6B] hover:bg-white/60 ring-1 ring-[#1B2E6B]/8")}>
+                <Home className="h-5 w-5" />
+                <span className="cba-nav">All Guides</span>
+              </button>
             </div>
 
-            <button onClick={() => { navigate({ type: "home" }); setQuery(""); }}
-              className={"mt-7 flex w-full items-center gap-3 rounded-2xl px-5 py-4 transition " + (view.type === "home" ? "bg-[#1B2E6B] text-white shadow-md" : "bg-white text-[#1B2E6B] hover:bg-white/60 ring-1 ring-[#1B2E6B]/8")}>
-              <Home className="h-5 w-5" />
-              <span className="cba-nav">All Guides</span>
-            </button>
-
-            <div className="mt-5 space-y-0.5">
-              {data.departments.map((d) => {
-                const Icon = ICON_MAP[d.id] || FALLBACK_ICONS[0];
-                const active = activeDeptId === d.id;
-                return (
-                  <button key={d.id} onClick={() => navigate({ type: "department", deptId: d.id })}
-                    className={"flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left transition " + (active ? "bg-[#1B2E6B]/8 text-[#1B2E6B]" : "text-slate-500 hover:bg-[#1B2E6B]/5 hover:text-[#1B2E6B]")}>
-                    <Icon className={"h-4 w-4 shrink-0 " + (active ? "text-[#1B2E6B]" : "text-slate-400")} />
-                    <span className="cba-nav flex-1 truncate">{d.title}</span>
-                    {deptArticleCount(d) > 0 && <span className="cba-eyebrow text-[10px] text-slate-400">{deptArticleCount(d)}</span>}
-                  </button>
-                );
-              })}
+            {/* only the guides list scrolls */}
+            <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+              <div className="space-y-0.5">
+                {data.departments.map((d) => {
+                  const Icon = ICON_MAP[d.id] || FALLBACK_ICONS[0];
+                  const active = activeDeptId === d.id;
+                  return (
+                    <button key={d.id} onClick={() => navigate({ type: "department", deptId: d.id })}
+                      className={"flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left transition " + (active ? "bg-[#1B2E6B]/8 text-[#1B2E6B]" : "text-slate-500 hover:bg-[#1B2E6B]/5 hover:text-[#1B2E6B]")}>
+                      <Icon className={"h-4 w-4 shrink-0 " + (active ? "text-[#1B2E6B]" : "text-slate-400")} />
+                      <span className="cba-nav flex-1 truncate">{d.title}</span>
+                      {deptArticleCount(d) > 0 && <span className="cba-eyebrow text-[10px] text-slate-400">{deptArticleCount(d)}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <button onClick={addDepartment} className="mt-3 flex w-full items-center gap-2 rounded-xl px-4 py-2.5 text-slate-400 transition hover:text-[#1B2E6B]">
+                <Plus className="h-4 w-4" /><span className="cba-nav">New department</span>
+              </button>
             </div>
-            <button onClick={addDepartment} className="mt-3 flex w-full items-center gap-2 rounded-xl px-4 py-2.5 text-slate-400 transition hover:text-[#1B2E6B]">
-              <Plus className="h-4 w-4" /><span className="cba-nav">New department</span>
-            </button>
           </div>
         </aside>
 
         {/* ===== MAIN COLUMN ===== */}
         <div className="min-w-0 flex-1">
-          {/* search bar */}
-          <div className="mb-6 flex items-center gap-3">
+          {/* search bar — pinned while the page scrolls */}
+          <div className="sticky top-0 z-30 -mt-6 mb-6 flex items-center gap-3 bg-[#F5F2EB] pb-3 pt-6">
             <div className="lg:hidden"><Logo /></div>
             <div className="relative ml-auto w-full max-w-md">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#1B2E6B]/40" />
