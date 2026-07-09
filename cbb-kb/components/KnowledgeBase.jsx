@@ -65,6 +65,24 @@ function Markdown({ text }) {
 const uid = () => Math.random().toString(36).slice(2, 9);
 const catKey = (deptId, catId) => deptId + "::" + catId;
 
+// First ~2 sentences of an article body, with markdown syntax stripped,
+// used as the preview line under each title in category lists.
+function articlePreview(body) {
+  const parts = [];
+  for (const raw of (body || "").split("\n")) {
+    let t = raw.trim();
+    if (!t || t.startsWith("## ") || /^!\[/.test(t)) continue;
+    t = t.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "").replace(/\*\*(.+?)\*\*/g, "$1");
+    parts.push(t);
+    if (parts.join(" ").length > 200) break;
+  }
+  let text = parts.join(" ");
+  const sentences = text.match(/[^.!?]+[.!?]+(\s|$)/g);
+  if (sentences) text = sentences.slice(0, 2).join("").trim();
+  if (text.length > 180) text = text.slice(0, 177).trimEnd() + "…";
+  return text;
+}
+
 // ---- view <-> URL ----
 function viewToQuery(v) {
   if (v.type === "department") return `?view=department&dept=${encodeURIComponent(v.deptId)}`;
@@ -623,14 +641,20 @@ export default function App() {
                   </div>
 
                   <div className="mt-4 overflow-hidden rounded-3xl border border-[#1B2E6B]/8 bg-white shadow-sm">
-                    {articles.map((a, i) => (
-                      <button key={a.id} onClick={() => openArticle(d.id, c.id, a.id)}
-                        className={"flex w-full items-center gap-4 px-6 py-4 text-left transition hover:bg-[#F5F2EB] " + (i !== 0 ? "border-t border-[#1B2E6B]/6" : "")}>
-                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#1B2E6B]/5 text-[#1B2E6B]"><FileText className="h-4 w-4" /></span>
-                        <span className="cba-body flex-1 font-medium text-slate-700">{a.title}</span>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
-                      </button>
-                    ))}
+                    {articles.map((a, i) => {
+                      const preview = articlePreview(a.body);
+                      return (
+                        <button key={a.id} onClick={() => openArticle(d.id, c.id, a.id)}
+                          className={"flex w-full items-start gap-4 px-6 py-4 text-left transition hover:bg-[#F5F2EB] " + (i !== 0 ? "border-t border-[#1B2E6B]/6" : "")}>
+                          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#1B2E6B]/5 text-[#1B2E6B]"><FileText className="h-4 w-4" /></span>
+                          <span className="min-w-0 flex-1">
+                            <span className="cba-body block font-medium text-slate-700">{a.title}</span>
+                            {preview && <span className="cba-body mt-0.5 block text-[13px] leading-snug text-slate-400 line-clamp-2">{preview}</span>}
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 self-center text-slate-300" />
+                        </button>
+                      );
+                    })}
                     {articles.length === 0 && (
                       <div className="px-6 py-16 text-center">
                         <p className="cba-serif text-[17px] italic text-slate-400">No articles here yet.</p>
