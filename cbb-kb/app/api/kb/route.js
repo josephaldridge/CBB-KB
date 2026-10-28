@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { readKB, writeKB, isValidKB, checkPasscode } from "@/lib/kb";
+import { readKB, writeKB, isValidKB, checkPasscode, checkPin } from "@/lib/kb";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req) {
   try {
+    if (!checkPin(req)) {
+      return NextResponse.json({ error: "PIN required" }, { status: 401 });
+    }
     const data = await readKB();
     return NextResponse.json(data);
   } catch (err) {

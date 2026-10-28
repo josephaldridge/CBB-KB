@@ -185,9 +185,11 @@ export default function KBChat({ data, onOpenArticle }) {
 
     let answerText = null;
     try {
+      let pinVal = "";
+      try { pinVal = window.localStorage.getItem("cbb-kb-pin") || ""; } catch {}
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-kb-pin": pinVal },
         body: JSON.stringify({
           question: q,
           history: history.slice(-3),

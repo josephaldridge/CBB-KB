@@ -67,6 +67,15 @@ export function isValidKB(data) {
   );
 }
 
+// Viewer PIN: gates READING the KB. Separate from the admin passcode that
+// gates editing. If KB_ACCESS_PIN is unset, the KB stays open.
+export function checkPin(req) {
+  const expected = process.env.KB_ACCESS_PIN || "";
+  if (!expected) return true;
+  const given = req.headers.get("x-kb-pin") || "";
+  return given === expected;
+}
+
 export function checkPasscode(req) {
   const expected = process.env.KB_ADMIN_PASSCODE || "";
   if (!expected) return true; // no passcode configured => open

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { checkPin } from "@/lib/kb";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +22,9 @@ Rules:
 - Formatting: plain sentences, "-" bullets, "1." numbered steps, and **bold** only. No tables, no links, no headings unless truly needed (use "## " if so). Keep answers under 200 words unless steps demand more.`;
 
 export async function POST(req) {
+  if (!checkPin(req)) {
+    return NextResponse.json({ error: "PIN required" }, { status: 401 });
+  }
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
     return NextResponse.json({ error: "AI not configured" }, { status: 503 });

@@ -120,6 +120,10 @@ export default function App() {
   const [draft, setDraft] = useState({ title: "", body: "" });
   const [toast, setToast] = useState("");
   const [passcode, setPasscode] = useState("");
+  const [locked, setLocked] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2800); };
 
@@ -143,13 +147,22 @@ export default function App() {
     }
   };
 
-  // ---- load from API ----
+  // ---- load from API (PIN-gated) ----
+  const fetchKB = async (pinVal) => {
+    const res = await fetch("/api/kb", { cache: "no-store", headers: { "x-kb-pin": pinVal || "" } });
+    if (res.status === 401) return "locked";
+    if (!res.ok) throw new Error("load failed");
+    setData(await res.json());
+    return "ok";
+  };
+
   useEffect(() => {
     (async () => {
+      let storedPin = "";
+      try { storedPin = window.localStorage.getItem("cbb-kb-pin") || ""; } catch {}
       try {
-        const res = await fetch("/api/kb", { cache: "no-store" });
-        if (!res.ok) throw new Error("load failed");
-        setData(await res.json());
+        const r = await fetchKB(storedPin);
+        if (r === "locked") setLocked(true);
       } catch {
         flash("Could not load the knowledge base. Check your connection.");
       } finally {
@@ -159,6 +172,27 @@ export default function App() {
     // remember passcode locally so editors don't retype it every time
     try { const p = window.localStorage.getItem("cbb-kb-pass"); if (p) setPasscode(p); } catch {}
   }, []);
+
+  const tryUnlock = async () => {
+    const attempt = pinInput.trim();
+    if (!attempt || unlocking) return;
+    setUnlocking(true);
+    setPinError(false);
+    try {
+      const r = await fetchKB(attempt);
+      if (r === "ok") {
+        try { window.localStorage.setItem("cbb-kb-pin", attempt); } catch {}
+        setLocked(false);
+        setPinInput("");
+      } else {
+        setPinError(true);
+      }
+    } catch {
+      setPinError(true);
+    } finally {
+      setUnlocking(false);
+    }
+  };
 
   // ---- sync view with URL + browser back/forward ----
   useEffect(() => {
@@ -410,6 +444,33 @@ export default function App() {
     a.href = url; a.download = "cbb-knowledge-base.json"; a.click();
     URL.revokeObjectURL(url);
   };
+
+  if (locked)
+    return (
+      <div className="cba-root grid min-h-screen place-items-center bg-[#F5F2EB] px-4">
+        <div className="w-full max-w-sm rounded-3xl bg-white p-9 text-center shadow-sm ring-1 ring-[#1B2E6B]/8">
+          <img src="/brand/logo-blue.svg" alt="Cowboy Bail Bonds" className="mx-auto h-14 w-auto" />
+          <div className="cba-eyebrow mt-6 text-[#1B2E6B]/60">Cowboy Academy · Internal</div>
+          <h1 className="cba-display mt-2 text-[26px] text-[#1B2E6B]">Enter PIN</h1>
+          <p className="cba-body mt-2 text-[13.5px] text-slate-500">This knowledge base is for Cowboy Bail Bonds staff.</p>
+          <input
+            type="password"
+            inputMode="numeric"
+            autoFocus
+            value={pinInput}
+            onChange={(e) => { setPinInput(e.target.value); setPinError(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") tryUnlock(); }}
+            placeholder="PIN"
+            className="cba-display mt-6 w-full rounded-xl border border-[#1B2E6B]/20 px-4 py-3 text-center text-[22px] tracking-[0.35em] text-[#1B2E6B] outline-none focus:border-[#1B2E6B]/50"
+          />
+          {pinError && <p className="cba-body mt-2 text-[12.5px] text-red-600">That PIN isn't right — try again.</p>}
+          <button onClick={tryUnlock} disabled={unlocking}
+            className="cba-nav mt-4 w-full rounded-full bg-[#1B2E6B] px-5 py-3 text-white transition hover:bg-[#24408f] disabled:opacity-60">
+            {unlocking ? "Checking…" : "Unlock"}
+          </button>
+        </div>
+      </div>
+    );
 
   if (loading || !data)
     return (
