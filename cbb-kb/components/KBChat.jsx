@@ -167,12 +167,46 @@ export default function KBChat({ data, onOpenArticle }) {
     return cut + "\n…";
   };
 
-  const send = (text) => {
+  const send = async (text) => {
     const q = (text ?? input).trim();
     if (!q) return;
     setInput("");
     const { results, tokens } = answer(q);
-    setMessages((m) => [...m, { role: "user", text: q }, { role: "bot", q, results: results || [], tokens: tokens || [] }]);
+    const botMsg = { role: "bot", q, results: results || [], tokens: tokens || [], pending: (results || []).length > 0 };
+    setMessages((m) => [...m, { role: "user", text: q }, botMsg]);
+    if (!botMsg.pending) return; // nothing matched: keep the not-found message, no AI call
+
+    // Previous answered exchanges give the model conversational context.
+    const history = [];
+    setMessages((m) => {
+      for (const msg of m) if (msg.role === "bot" && msg.answer && msg.q) history.push({ q: msg.q, a: msg.answer });
+      return m;
+    });
+
+    let answerText = null;
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: q,
+          history: history.slice(-3),
+          chunks: botMsg.results.map((ch) => ({
+            title: ch.artTitle,
+            path: ch.loc.deptTitle + " · " + ch.loc.catTitle,
+            text: ch.md,
+          })),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.answer) answerText = data.answer;
+      }
+    } catch {}
+
+    setMessages((m) => m.map((msg) => msg === botMsg || (msg.role === "bot" && msg.pending && msg.q === q)
+      ? { ...msg, pending: false, answer: answerText }
+      : msg));
   };
 
   const msgRefs = useRef({});
@@ -233,7 +267,29 @@ export default function KBChat({ data, onOpenArticle }) {
               </div>
             ) : (
               <div key={i} className="space-y-2.5">
-                {m.results.length === 0 ? (
+                {m.pending ? (
+                  <div className="flex items-center gap-2 rounded-2xl rounded-tl-md bg-white px-4 py-3 shadow-sm ring-1 ring-[#1B2E6B]/8">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[#1B2E6B]/50" />
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[#1B2E6B]/50" style={{ animationDelay: "150ms" }} />
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-[#1B2E6B]/50" style={{ animationDelay: "300ms" }} />
+                    <span className="cba-body ml-1 text-[12px] text-slate-400">Checking the guides…</span>
+                  </div>
+                ) : m.answer ? (
+                  <>
+                    <div className="rounded-2xl rounded-tl-md bg-white p-4 shadow-sm ring-1 ring-[#1B2E6B]/8">
+                      <div className="kbchat-md text-[13.5px]"><Markdown text={m.answer} /></div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 px-1">
+                      <span className="cba-eyebrow text-[9px] text-slate-400">Sources:</span>
+                      {m.results.map((ch) => (
+                        <button key={ch.artId} onClick={() => onOpenArticle(ch.loc.deptId, ch.loc.catId, ch.artId)}
+                          className="cba-body rounded-full border border-[#1B2E6B]/15 bg-white px-2.5 py-1 text-[11px] text-[#1B2E6B] transition hover:bg-[#1B2E6B]/5">
+                          {ch.artTitle}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : m.results.length === 0 ? (
                   <div className="rounded-2xl rounded-tl-md bg-white p-4 shadow-sm ring-1 ring-[#1B2E6B]/8">
                     <p className="cba-body text-[13.5px] text-slate-600">I couldn't find that in the KB. Try different words (or an abbreviation — BIJ, FTA, XFR…), or use the search bar up top. If it genuinely isn't written down yet, that might be an article worth adding.</p>
                   </div>
