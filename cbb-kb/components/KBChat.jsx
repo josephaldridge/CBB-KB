@@ -103,6 +103,11 @@ export default function KBChat({ data, onOpenArticle }) {
         else buf.push(line);
       }
       flush();
+      if (art.botNotes && art.botNotes.trim()) {
+        heading = "Reference data";
+        buf = [art.botNotes.trim()];
+        flush();
+      }
     }
     return chunks;
   }, [data]);
@@ -140,7 +145,7 @@ export default function KBChat({ data, onOpenArticle }) {
     const nq = normalize(query);
     for (const pin of PINNED) {
       if (pin.test(nq) && !seen.has(pin.artId)) {
-        const hit = index.find((ch) => ch.artId === pin.artId);
+        const hit = scored.find((r) => r.ch.artId === pin.artId)?.ch || index.find((ch) => ch.artId === pin.artId);
         if (hit) { seen.add(pin.artId); results.push(hit); }
       }
     }
@@ -196,11 +201,14 @@ export default function KBChat({ data, onOpenArticle }) {
         body: JSON.stringify({
           question: q,
           history: history.slice(-3),
-          chunks: botMsg.results.map((ch) => ({
-            title: ch.artTitle,
-            path: ch.loc.deptTitle + " · " + ch.loc.catTitle,
-            text: ch.md,
-          })),
+          chunks: botMsg.results.map((ch) => {
+            const notes = (data.articles[ch.artId]?.botNotes || "").trim();
+            return {
+              title: ch.artTitle,
+              path: ch.loc.deptTitle + " · " + ch.loc.catTitle,
+              text: notes && ch.heading !== "Reference data" ? ch.md + "\n\n## Reference data\n" + notes : ch.md,
+            };
+          }),
         }),
       });
       clearTimeout(timer);

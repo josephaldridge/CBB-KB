@@ -267,7 +267,8 @@ export default function App() {
           if (!a) continue;
           const inTitle = a.title.toLowerCase().includes(q);
           const inBody = a.body.toLowerCase().includes(q);
-          if (inTitle || inBody) {
+          const inNotes = (a.botNotes || "").toLowerCase().includes(q);
+          if (inTitle || inBody || inNotes) {
             let snippet = "";
             if (inBody) {
               const idx = a.body.toLowerCase().indexOf(q);
@@ -283,13 +284,20 @@ export default function App() {
   // ---- CRUD: articles ----
   const openArticle = (deptId, catId, artId) => { navigate({ type: "article", deptId, catId, artId }); if (typeof window !== "undefined") window.scrollTo(0, 0); };
 
-  const startEdit = (art) => { if (!ensurePasscode()) return; setDraft({ title: art.title, body: art.body }); setEditing(true); };
+  const startEdit = (art) => { if (!ensurePasscode()) return; setDraft({ title: art.title, body: art.body, botNotes: art.botNotes || "" }); setEditing(true); };
+
+  const imageSrcs = (body) => [...(body || "").matchAll(/!\[[^\]]*\]\(([^)]*)\)/g)].map((m) => m[1]).join("|");
 
   const saveEdit = async () => {
     const next = structuredClone(data);
     const a = next.articles[view.artId];
+    const notes = (draft.botNotes || "").trim();
+    if (a.botNotes && imageSrcs(a.body) !== imageSrcs(draft.body) && notes === a.botNotes.trim()) {
+      if (!confirm("You changed a picture in this article, but the hidden chatbot reference wasn't updated. The assistant will keep answering from the old info.\n\nSave anyway?")) return;
+    }
     a.title = draft.title.trim() || "Untitled";
     a.body = draft.body;
+    if (notes) a.botNotes = notes; else delete a.botNotes;
     const ok = await persist(next);
     if (ok) { setEditing(false); flash("Article saved"); }
   };
@@ -764,6 +772,10 @@ export default function App() {
                         <label className="cba-eyebrow mb-2 block text-[#1B2E6B]/60">Content — ## heading · - bullet · 1. numbered · **bold**</label>
                         <textarea value={draft.body} onChange={(e)=>setDraft({...draft,body:e.target.value})} rows={22}
                           className="w-full resize-y rounded-xl border border-[#1B2E6B]/20 px-4 py-3 text-[13px] leading-relaxed text-slate-700 outline-none focus:border-[#1B2E6B]/50" style={{fontFamily:"'IBM Plex Mono', ui-monospace, monospace"}} />
+                        <label className="cba-eyebrow mt-6 mb-1 block text-[#1B2E6B]/60">Chatbot-only reference — hidden from readers</label>
+                        <p className="cba-body mb-2 text-[12.5px] text-slate-400">If this article has a picture with information in it (like a table), type that information here so the KB Assistant can answer from it. Update it whenever the picture changes.</p>
+                        <textarea value={draft.botNotes || ""} onChange={(e)=>setDraft({...draft,botNotes:e.target.value})} rows={6} placeholder="Optional"
+                          className="w-full resize-y rounded-xl border border-dashed border-[#1B2E6B]/25 bg-[#FAF8F3] px-4 py-3 text-[13px] leading-relaxed text-slate-700 outline-none focus:border-[#1B2E6B]/50" style={{fontFamily:"'IBM Plex Mono', ui-monospace, monospace"}} />
                         <div className="mt-6 flex gap-2">
                           <button onClick={saveEdit} className="cba-nav flex items-center gap-1.5 rounded-full bg-[#1B2E6B] px-5 py-2.5 text-white hover:bg-[#24408f]"><Save className="h-4 w-4"/>Save changes</button>
                           <button onClick={()=>setEditing(false)} className="cba-nav flex items-center gap-1.5 rounded-full border border-[#1B2E6B]/20 px-5 py-2.5 text-slate-500 hover:text-[#1B2E6B]"><X className="h-4 w-4"/>Cancel</button>

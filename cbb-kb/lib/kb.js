@@ -39,7 +39,12 @@ export async function writeKB(data) {
 
 // Very lightweight shape check so a bad PUT can't corrupt the store.
 function isValidArticle(a) {
-  return typeof a.id === "string" && typeof a.title === "string" && typeof a.body === "string";
+  return (
+    typeof a.id === "string" &&
+    typeof a.title === "string" &&
+    typeof a.body === "string" &&
+    (a.botNotes === undefined || typeof a.botNotes === "string")
+  );
 }
 function isValidCategory(c) {
   return (

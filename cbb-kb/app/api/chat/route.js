@@ -44,7 +44,7 @@ export async function POST(req) {
 
     const context = (Array.isArray(chunks) ? chunks : [])
       .slice(0, 6)
-      .map((c, i) => `[Excerpt ${i + 1} — ${String(c.path || "")} › ${String(c.title || "")}]\n${String(c.text || "").slice(0, 2400)}`)
+      .map((c, i) => `[Excerpt ${i + 1} — ${String(c.path || "")} › ${String(c.title || "")}]\n${String(c.text || "").slice(0, 4000)}`)
       .join("\n\n---\n\n")
       .slice(0, 20000);
 
