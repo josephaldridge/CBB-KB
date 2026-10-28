@@ -20,6 +20,7 @@ function renderInline(text) {
 }
 
 export function Markdown({ text }) {
+  const [zoom, setZoom] = React.useState(null);
   const lines = (text || "").split("\n");
   const blocks = [];
   let i = 0;
@@ -28,7 +29,7 @@ export function Markdown({ text }) {
     if (line.trim() === "") { i++; continue; }
     const imgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (imgMatch) {
-      blocks.push(<img key={i} src={imgMatch[2]} alt={imgMatch[1]} className="my-4 w-full rounded-2xl border border-[#1B2E6B]/10 shadow-sm" />);
+      blocks.push(<img key={i} src={imgMatch[2]} alt={imgMatch[1]} title="Click to enlarge" onClick={() => setZoom(imgMatch[2])} className="my-4 w-full cursor-zoom-in rounded-2xl border border-[#1B2E6B]/10 shadow-sm" />);
       i++;
     } else if (line.startsWith("## ")) {
       blocks.push(<h3 key={i} className="cba-eyebrow mt-9 mb-3 text-[#1B2E6B]">{line.slice(3)}</h3>);
@@ -60,7 +61,16 @@ export function Markdown({ text }) {
       i++;
     }
   }
-  return <div>{blocks}</div>;
+  return (
+    <div>
+      {blocks}
+      {zoom && (
+        <div className="fixed inset-0 z-[100] grid cursor-zoom-out place-items-center bg-black/75 p-4" onClick={() => setZoom(null)}>
+          <img src={zoom} alt="" className="max-h-full max-w-full rounded-xl shadow-2xl" />
+        </div>
+      )}
+    </div>
+  );
 }
 
 const uid = () => Math.random().toString(36).slice(2, 9);

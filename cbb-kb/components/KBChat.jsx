@@ -175,9 +175,14 @@ export default function KBChat({ data, onOpenArticle }) {
     setMessages((m) => [...m, { role: "user", text: q }, { role: "bot", q, results: results || [], tokens: tokens || [] }]);
   };
 
+  const msgRefs = useRef({});
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, open]);
+    // Anchor the latest question at the top of the view so the answer reads top-down.
+    let lastUser = -1;
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "user") { lastUser = i; break; }
+    const el = msgRefs.current[lastUser];
+    if (el) el.scrollIntoView({ block: "start" });
+  }, [messages]);
 
   const SUGGESTIONS = [
     "What's the down payment on a $10,000 bond?",
@@ -223,7 +228,7 @@ export default function KBChat({ data, onOpenArticle }) {
             </div>
 
             {messages.map((m, i) => m.role === "user" ? (
-              <div key={i} className="flex justify-end">
+              <div key={i} ref={(el) => { msgRefs.current[i] = el; }} className="flex justify-end scroll-mt-2">
                 <div className="cba-body max-w-[85%] rounded-2xl rounded-tr-md bg-[#1B2E6B] px-4 py-2.5 text-[13.5px] text-white shadow-sm">{m.text}</div>
               </div>
             ) : (
