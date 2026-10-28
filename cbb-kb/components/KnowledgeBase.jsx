@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import KBChat from "./KBChat";
 import { Search, ChevronRight, Edit3, Trash2, Plus, Save, X, BookOpen, FileText, Folder, Home, ArrowLeft, Download, RotateCcw, Check, ShieldCheck, Globe, CheckCircle, Gavel, DollarSign, HelpCircle, Book, Wrench, Users, Lock, Sparkles } from "lucide-react";
 
 function renderInline(text) {
@@ -18,7 +19,7 @@ function renderInline(text) {
   return parts.length ? parts : text;
 }
 
-function Markdown({ text }) {
+export function Markdown({ text }) {
   const lines = (text || "").split("\n");
   const blocks = [];
   let i = 0;
@@ -795,6 +796,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* KB assistant chat */}
+      <KBChat data={data} onOpenArticle={openArticle} />
 
       {/* toast + save indicator */}
       {(toast || saving) && (
