@@ -3,13 +3,20 @@ import { checkPin } from "@/lib/kb";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 // Proxies KB assistant questions to Google AI Studio (Gemini). The API key
 // stays server-side; the client only ever sends the question plus the KB
 // excerpts the retrieval layer already matched. If the key is missing or the
 // upstream call fails (rate limits on the free tier), the client falls back
 // to retrieval-only answers.
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+// Free-tier capacity varies by model; lite models answer in ~10-15s while full
+// flash models can queue for minutes, so try lite models in order.
+const MODELS = (process.env.GEMINI_MODEL || "gemini-flash-lite-latest,gemini-3.5-flash-lite")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+const DEADLINE_MS = 24000;
 
 const SYSTEM = `You are the Cowboy KB Assistant, the internal knowledge-base helper for Cowboy Bail Bonds staff (bond advisors, closers, underwriters).
 
@@ -53,30 +60,44 @@ export async function POST(req) {
       parts: [{ text: `KB EXCERPTS:\n\n${context}\n\nSTAFF QUESTION: ${question}` }],
     });
 
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: SYSTEM }] },
-          contents,
-          generationConfig: { temperature: 0.2, maxOutputTokens: 1200 },
-        }),
+    const payload = JSON.stringify({
+      system_instruction: { parts: [{ text: SYSTEM }] },
+      contents,
+      generationConfig: { temperature: 0.2, maxOutputTokens: 1200 },
+    });
+    const started = Date.now();
+    let lastStatus = 0;
+    for (const model of MODELS) {
+      const remaining = DEADLINE_MS - (Date.now() - started);
+      if (remaining < 3000) break;
+      let r;
+      try {
+        r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+            signal: AbortSignal.timeout(remaining),
+          }
+        );
+      } catch {
+        lastStatus = 504;
+        break;
       }
-    );
-    if (!r.ok) {
-      return NextResponse.json({ error: "Upstream error", status: r.status }, { status: 502 });
+      if (!r.ok) {
+        lastStatus = r.status;
+        continue;
+      }
+      const data = await r.json();
+      const answer = (data.candidates?.[0]?.content?.parts || [])
+        .map((p) => p.text || "")
+        .join("")
+        .trim();
+      if (answer) return NextResponse.json({ answer, model });
+      lastStatus = 204;
     }
-    const data = await r.json();
-    const answer = (data.candidates?.[0]?.content?.parts || [])
-      .map((p) => p.text || "")
-      .join("")
-      .trim();
-    if (!answer) {
-      return NextResponse.json({ error: "Empty answer" }, { status: 502 });
-    }
-    return NextResponse.json({ answer });
+    return NextResponse.json({ error: "Upstream error", status: lastStatus }, { status: 502 });
   } catch (err) {
     return NextResponse.json({ error: "Chat failed", detail: String(err) }, { status: 500 });
   }
